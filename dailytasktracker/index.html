@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="bn">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Task Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        /* Custom styles for background and font */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-image: url('https://source.unsplash.com/random/1920x1080/?nature,mountain,forest,lake');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+            background-color: #f8f8f8;
+            /* Default background for light mode */
+            color: #333;
+            /* Default text color for light mode */
+        }
+
+        /* Main container styling for better readability and visual appeal */
+        .task-container {
+            background-color: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(5px);
+            border-radius: 1rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Styling for task list items */
+        .task-item {
+            display: flex;
+            align-items: flex-start;
+            /* Changed from center to flex-start for multiline text */
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background-color: #f9fafb;
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
+            transition: all 0.2s ease-in-out;
+            cursor: grab;
+            /* Indicates draggable */
+        }
+
+        .task-item.done {
+            text-decoration: line-through;
+            color: #6b7280;
+            background-color: #eff6ff;
+        }
+
+        .task-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Styles for drag and drop feedback */
+        .task-item.dragging {
+            opacity: 0.5;
+            border: 2px dashed #4f46e5;
+        }
+
+        .task-item.drag-over {
+            border: 2px dashed #3b82f6;
+            background-color: #e0f2fe;
+            /* Light blue background for drag over */
+        }
+
+        /* Input and button styling */
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .input-group input[type="text"] {
+            flex-grow: 1;
+            border: 1px solid #d1d5db;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .input-group button {
+            background-color: #4f46e5;
+            color: white;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: background-color 0.2s ease-in-out;
+            display: flex;
+            /* Added for icon centering */
+            align-items: center;
+            /* Added for icon centering */
+            justify-content: center;
+            /* Added for icon centering */
+        }
+
+        .input-group button:hover {
+            background-color: #4338ca;
+        }
+
+        /* Icon button styling */
+        .icon-button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            border-radius: 0.25rem;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .icon-button:hover {
+            background-color: #e5e7eb;
+        }
+
+        /* SVG icon sizing */
+        .icon-button svg {
+            width: 1.25rem;
+            height: 1.25rem;
+            color: #6b7280;
+        }
+
+        .icon-button.delete-button svg {
+            color: #ef4444;
+        }
+
+        .icon-button.delete-button:hover svg {
+            color: #dc2626;
+        }
+
+        .icon-button.toggle-button svg {
+            color: #10b981;
+        }
+
+        .icon-button.toggle-button:hover svg {
+            color: #059669;
+        }
+
+        .icon-button.edit-button svg {
+            color: #f59e0b;
+            /* Yellow for edit */
+        }
+
+        .icon-button.edit-button:hover svg {
+            color: #d97706;
+        }
+
+        /* Styling for saved date items */
+        .saved-date-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .saved-date-item .date-button {
+            flex-grow: 1;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+            font-weight: 500;
+            text-align: center;
+            border-radius: 0.5rem;
+            transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+            transition-duration: 200ms;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+            border: none;
+            /* Ensure no default button border */
+        }
+
+        /* Responsive grid for task sections */
+        @media (min-width: 768px) {
+            .task-sections-grid {
+                grid-template-columns: repeat(3, 1fr);
+                align-items: start;
+            }
+        }
+
+        /* Modal specific styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-body {
+            overflow-y: auto;
+            flex-grow: 1;
+            padding-right: 0.5rem;
+            color: #4a5568;
+            /* Default color for modal body text */
+        }
+
+        /* Optional: Scrollbar styling for webkit browsers */
+        .modal-body::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .modal-body::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        .modal-body::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+
+        .modal-body::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Progress Bar Styles */
+        .progress-bar-container {
+            width: 100%;
+            background-color: #e2e8f0;
+            border-radius: 9999px;
+            height: 1.5rem;
+            overflow: hidden;
+            margin-bottom: 1rem;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #4f46e5;
+            border-radius: 9999px;
+            transition: width 0.5s ease-in-out;
+        }
+
+        .progress-bar-text {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4a5568;
+            /* Default color for progress text */
+            font-size: 0.875rem;
+            font-weight: bold;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            transition: color 0.5s ease-in-out;
+            /* Smooth transition for color change */
+        }
+
+        /* Custom colors for different progress bars */
+        #study-progress-fill {
+            background-color: #3b82f6;
+        }
+
+        /* Blue for study */
+        #skill-progress-fill {
+            background-color: #22c55e;
+        }
+
+        /* Green for skill */
+        #necessary-progress-fill {
+            background-color: #a855f7;
+        }
+
+        /* Purple for necessary work */
+
+        /* Loading Overlay Styles */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1001;
+            /* Above modal overlay */
+            visibility: hidden;
+            opacity: 0;
+            transition: visibility 0s, opacity 0.3s ease;
+        }
+
+        .loading-overlay.visible {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #4f46e5;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Numbering style */
+        .task-number {
+            font-weight: bold;
+            margin-right: 0.5rem;
+            color: #6b7280;
+            /* A subtle grey */
+            min-width: 1.5rem;
+            /* Ensure consistent width for numbers */
+            text-align: right;
+        }
+
+        /* Task Text Truncation and Tooltip Styles - MODIFIED */
+        .task-text-span {
+            /* Renamed for clarity, removed 'truncated' as it's no longer truncated */
+            flex-grow: 1;
+            color: #374151;
+            /* Darker text for readability */
+            /* Removed: white-space: nowrap; overflow: hidden; text-overflow: ellipsis; */
+            word-wrap: break-word;
+            /* Allows long words to break and wrap */
+            white-space: pre-wrap;
+            /* Preserves whitespace and newlines */
+            cursor: default;
+            min-width: 0;
+            /* Allows text to shrink within flex container */
+        }
+
+        /* Removed .task-text-truncated::after and :hover::after styles */
+
+
+        /* Congratulations Modal styles */
+        #congratulations-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            /* Higher than other modals */
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s ease-in-out, visibility 0.5s ease-in-out;
+        }
+
+        #congratulations-modal.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #congratulations-content {
+            background-color: #fff;
+            padding: 1.5rem 2rem;
+            /* Reduced padding */
+            border-radius: 1rem;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            transform: scale(0.9);
+            transition: transform 0.3s ease-out;
+            position: relative;
+            /* For close button positioning */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            /* Reduced gap between elements */
+        }
+
+        #congratulations-modal.visible #congratulations-content {
+            transform: scale(1);
+        }
+
+        #congratulations-content h2 {
+            font-size: 2.5rem;
+            /* Slightly smaller font for compactness */
+            color: #4f46e5;
+            margin-bottom: 0.5rem;
+            /* Reduced margin */
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        #congratulations-content p {
+            font-size: 1.125rem;
+            /* Slightly smaller font */
+            color: #4a5568;
+            /* Darker grey for better contrast */
+            margin-bottom: 0;
+            /* No margin-bottom after the text */
+        }
+
+        #congratulations-modal .close-button {
+            position: absolute;
+            top: 0.5rem;
+            /* Adjusted for closer proximity */
+            right: 0.5rem;
+            /* Adjusted for closer proximity */
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: #888;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        #congratulations-modal .close-button:hover {
+            color: #333;
+        }
+
+        /* Confetti Effect Styles */
+        #confetti-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            /* Allows clicks to pass through */
+            z-index: 5000;
+            /* Ensure it's on top of everything */
+            overflow: hidden;
+            /* Hide confetti falling outside viewport */
+        }
+
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #f06;
+            /* Default color */
+            border-radius: 50%;
+            /* Make it round */
+            opacity: 0;
+            animation: confetti-fall 3s forwards, confetti-rotate 1s infinite linear;
+            transform-origin: center;
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translate3d(var(--confetti-start-x, 0), var(--confetti-start-y, -100px), 0) rotate(0deg);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate3d(var(--confetti-end-x, 0), 100vh, 0) rotate(var(--rotate-speed, 360deg));
+                opacity: 0.75;
+            }
+        }
+
+        @keyframes confetti-rotate {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* END NEW: Confetti Effect Styles */
+    </style>
+</head>
+
+<body class="bg-gray-100">
+
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
+    <div class="task-container">
+        <header class="text-center mb-6 relative">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-4">Daily Task Tracker</h1>
+
+            <div class="flex flex-col md:flex-row items-center justify-center gap-4">
+                <label for="date-picker" class="text-lg font-medium text-gray-700">Select Date:</label>
+                <input type="date" id="date-picker"
+                    class="p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-lg">
+
+                <button id="open-reading-funnel-btn"
+                    class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 ease-in-out">
+                    Reading Funnel
+                </button>
+            </div>
+        </header>
+
+        <section class="mb-6">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-3">Saved Entries</h2>
+            <div id="saved-dates-container" class="flex flex-wrap gap-2 justify-center">
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 task-sections-grid">
+            <section class="bg-blue-50 p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold text-blue-800 mb-4 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-book-open-text">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                        <path d="M10 12H8" />
+                        <path d="M16 12h2" />
+                        <path d="M16 18h2" />
+                        <path d="M16 15h2" />
+                        <path d="M10 18H8" />
+                        <path d="M10 15H8" />
+                    </svg>
+                    Study List
+                </h2>
+                <div class="progress-bar-container">
+                    <div id="study-progress-fill" class="progress-bar-fill"></div>
+                    <div id="study-progress-text" class="progress-bar-text">0%</div>
+                </div>
+                <div class="input-group mb-4">
+                    <input type="text" id="study-input" placeholder="Add a new study task..." class="w-full">
+                    <button onclick="addTask('study')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="lucide lucide-plus">
+                            <path d="M12 5v14" />
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+                </div>
+                <ul id="study-list" class="space-y-2">
+                </ul>
+            </section>
+
+            <section class="bg-green-50 p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold text-green-800 mb-4 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-lightbulb">
+                        <path
+                            d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 6c0 1.3.5 2.6 1.5 3.5.8.7 1.3 1.5 1.5 2.5" />
+                        <path d="M9 18h6" />
+                        <path d="M10 22h4" />
+                        <path d="M11 18v4" />
+                        <path d="M7 18h2" />
+                    </svg>
+                    Skill Development
+                </h2>
+                <div class="progress-bar-container">
+                    <div id="skill-progress-fill" class="progress-bar-fill"></div>
+                    <div id="skill-progress-text" class="progress-bar-text">0%</div>
+                </div>
+                <div class="input-group mb-4">
+                    <input type="text" id="skill-input" placeholder="Add a new skill task..." class="w-full">
+                    <button onclick="addTask('skill')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="lucide lucide-plus">
+                            <path d="M12 5v14" />
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+                </div>
+                <ul id="skill-list" class="space-y-2">
+                </ul>
+            </section>
+
+            <section class="bg-purple-50 p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold text-purple-800 mb-4 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-clipboard-list">
+                        <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                        <path d="M12 11h4" />
+                        <path d="M12 16h4" />
+                        <path d="M8 11h.01" />
+                        <path d="M8 16h.01" />
+                    </svg>
+                    Necessary Work
+                </h2>
+                <div class="progress-bar-container">
+                    <div id="necessary-progress-fill" class="progress-bar-fill"></div>
+                    <div id="necessary-progress-text" class="progress-bar-text">0%</div>
+                </div>
+                <div class="input-group mb-4">
+                    <input type="text" id="necessary-input" placeholder="Add a new necessary task..." class="w-full">
+                    <button onclick="addTask('necessary')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="lucide lucide-plus">
+                            <path d="M12 5v14" />
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+                </div>
+                <ul id="necessary-list" class="space-y-2">
+                </ul>
+            </section>
+        </div>
+    </div>
+
+    <div id="reading-funnel-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="flex justify-between items-center pb-4 border-b border-gray-200 mb-4">
+                <h3 class="text-2xl font-bold text-gray-800">Reading Funnel</h3>
+                <button id="close-reading-funnel-btn"
+                    class="text-gray-500 hover:text-gray-800 transition-colors duration-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-x">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div id="reading-funnel-content" class="modal-body text-gray-700 leading-relaxed">
+                <p><strong class="font-bold">Physics, Chemistry, Biology:</strong> Board book, Netter, Quick
+                    Preparation, Supplement (Except Biology), FT Sugg Book, QNA</p>
+                <p><strong class="font-bold">English 1st Paper:</strong> Board book, Netter</p>
+                <p><strong class="font-bold">English 2nd Paper:</strong> Advanced Learners, Quick Preparation, Netter
+                </p>
+                <p><strong class="font-bold">General Math, Higher Math:</strong> Board book with math solving from guide
+                    (especially Secret of CQ), Netter, Quick Prep, FT Sugg Book, QNA</p>
+                <p><strong class="font-bold">Bangla 1st Paper, Bangla 2nd Paper, BGS, ICT:</strong> Board book, Netter,
+                    Quick Prep, Made Easy MCQ, FT Sugg Book, QNA</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="congratulations-modal" class="hidden">
+        <div id="congratulations-content">
+            <button class="close-button" onclick="closeCongratulationsModal()">×</button>
+            <h2>Congratulations!</h2>
+            <p class="text-xl text-gray-700">You've completed all tasks in this section!</p>
+        </div>
+    </div>
+
+    <div id="confetti-container"></div>
+
+
+    <script>
+        // Declare app and db in a higher scope so they are accessible globally
+        let app;
+        let db;
+
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCdVXY8feu2uiW_JVv0tOtN1MMKztCcrTU",
+            authDomain: "dailytasktracker-817d5.firebaseapp.com",
+            projectId: "dailytasktracker-817d5",
+            storageBucket: "dailytasktracker-817d5.firebasestorage.app",
+            messagingSenderId: "471139809864",
+            appId: "1:471139809864:web:2d98f777906b94810cb67d"
+        };
+
+        // Initialize Firebase
+        try {
+            app = firebase.initializeApp(firebaseConfig); // Assign to global 'app'
+            db = firebase.firestore(); // Assign to global 'db'
+            console.log("Firebase initialized successfully."); // Debugging
+        } catch (error) {
+            console.error("Firebase Initialization Error:", error); // Debugging
+            alert("Failed to initialize Firebase. Please check your Firebase config.");
+        }
+
+
+        // Global variables to manage tasks and current date
+        let currentDate; // Stores the currently selected date (YYYY-MM-DD)
+        let tasksData = {}; // Stores all tasks, keyed by date: { 'YYYY-MM-DD': { study: [], skill: [], necessary: [] } }
+
+        // DOM element references
+        const datePicker = document.getElementById('date-picker');
+        const savedDatesContainer = document.getElementById('saved-dates-container');
+        const loadingOverlay = document.getElementById('loading-overlay'); // Loading overlay
+
+        // Task list elements for each section
+        const taskLists = {
+            study: document.getElementById('study-list'),
+            skill: document.getElementById('skill-list'),
+            necessary: document.getElementById('necessary-list')
+        };
+
+        // Task input elements for each section
+        const taskInputs = {
+            study: document.getElementById('study-input'),
+            skill: document.getElementById('skill-input'),
+            necessary: document.getElementById('necessary-input')
+        };
+
+        // Progress bar elements
+        const progressBars = {
+            study: {
+                fill: document.getElementById('study-progress-fill'),
+                text: document.getElementById('study-progress-text')
+            },
+            skill: {
+                fill: document.getElementById('skill-progress-fill'),
+                text: document.getElementById('skill-progress-text')
+            },
+            necessary: {
+                fill: document.getElementById('necessary-progress-fill'),
+                text: document.getElementById('necessary-progress-text')
+            }
+        };
+
+        // Modal elements
+        const openReadingFunnelBtn = document.getElementById('open-reading-funnel-btn');
+        const readingFunnelModal = document.getElementById('reading-funnel-modal');
+        const closeReadingFunnelBtn = document.getElementById('close-reading-funnel-btn');
+
+        // Congratulations Modal elements
+        const congratulationsModal = document.getElementById('congratulations-modal');
+
+        // Drag and Drop variables
+        let draggedItem = null; // Stores the currently dragged task item (li element)
+        let originalSectionType = null; // Stores the section type of the dragged item
+        let originalIndex = -1; // Stores the original index of the dragged item
+
+        // Audio for congratulations
+        let congratsAudio = null;
+
+        /**
+         * Shows the loading overlay.
+         */
+        function showLoading() {
+            loadingOverlay.classList.add('visible');
+        }
+
+        /**
+         * Hides the loading overlay.
+         */
+        function hideLoading() {
+            loadingOverlay.classList.remove('visible');
+        }
+
+        /**
+         * Formats a Date object into a YYYY-MM-DD string.
+         * This format is required for HTML input type="date".
+         * @param {Date} date - The Date object to format.
+         * @returns {string} The formatted date string.
+         */
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        /**
+         * Formats a YYYY-MM-DD date string into a DD-MM-YYYY string for display.
+         * This is for displaying dates in the "Saved Entries" section in Bangladesh format.
+         * @param {string} dateString - The date string in YYYY-MM-DD format.
+         * @returns {string} The formatted date string in DD-MM-YYYY format.
+         */
+        function formatDateForDisplay(dateString) {
+            const [year, month, day] = dateString.split('-');
+            return `${day}-${month}-${year}`;
+        }
+
+        /**
+         * Loads tasks for a specific date from Firestore and updates the UI.
+         * If no tasks exist for the date, initializes an empty structure.
+         * @param {string} date - The date string (YYYY-MM-DD) to load tasks for.
+         */
+        async function loadTasksForDate(date) {
+            showLoading();
+            currentDate = date;
+            datePicker.value = currentDate; // Ensure date picker reflects the loaded date
+            console.log(`Attempting to load tasks for date: ${date}`); // Debugging
+
+            try {
+                // Ensure db is initialized and defined globally
+                if (typeof db === 'undefined' || db === null) {
+                    throw new Error("Firestore database (db) not initialized. Check Firebase setup.");
+                }
+                const docRef = db.collection("tasks").doc(currentDate);
+                console.log(`Fetching document: tasks/${currentDate}`); // Debugging
+                const doc = await docRef.get();
+
+                if (doc.exists) {
+                    tasksData[currentDate] = doc.data();
+                    console.log("Document data received:", tasksData[currentDate]); // Debugging
+                    // Migration: If 'self' exists but 'necessary' doesn't, migrate it
+                    if (tasksData[currentDate].self && !tasksData[currentDate].necessary) {
+                        console.log("Migrating 'self' tasks to 'necessary'."); // Debugging
+                        tasksData[currentDate].necessary = tasksData[currentDate].self;
+                        delete tasksData[currentDate].self;
+                        await docRef.set(tasksData[currentDate]); // Save migrated data back to Firestore
+                        console.log("Migration complete and saved."); // Debugging
+                    }
+                } else {
+                    console.log(`No document found for date: ${date}. Initializing new data.`); // Debugging
+                    // If document doesn't exist, initialize with empty arrays and create it
+                    tasksData[currentDate] = { study: [], skill: [], necessary: [] };
+                    await docRef.set(tasksData[currentDate]);
+                    console.log("New document initialized and saved."); // Debugging
+                }
+
+                // Ensure 'necessary' key exists even if it was not migrated (e.g., brand new date)
+                if (!tasksData[currentDate].necessary) {
+                    tasksData[currentDate].necessary = [];
+                }
+
+                renderAllTasks(); // Consolidated rendering
+                updateAllProgressBars(); // Consolidated progress bar updates
+                renderSavedDates(); // Re-render saved dates to update active state and add new dates
+                console.log("Tasks loaded and rendered successfully."); // Debugging
+            } catch (e) {
+                console.error("Error loading tasks: ", e); // More detailed error logging
+                alert("Error loading tasks. Please check your Firebase setup and internet connection. See console for details.");
+            } finally {
+                hideLoading();
+            }
+        }
+
+        /**
+         * Saves the current tasksData for the selected date to Firestore.
+         * @async
+         */
+        async function saveTasks() {
+            showLoading();
+            try {
+                if (typeof db === 'undefined' || db === null) { // Added check
+                    throw new Error("Firestore database (db) not initialized.");
+                }
+                await db.collection("tasks").doc(currentDate).set(tasksData[currentDate]);
+                console.log(`Tasks saved for date: ${currentDate}`); // Debugging
+                renderSavedDates(); // Update saved dates list after saving
+            } catch (e) {
+                console.error("Error saving tasks: ", e);
+                alert("Error saving tasks. Please try again. See console for details.");
+            } finally {
+                hideLoading();
+            }
+        }
+
+        /**
+         * Adds a new task to the specified section for the current date.
+         * @param {string} sectionType - The type of section ('study', 'skill', 'necessary').
+         * @async
+         */
+        async function addTask(sectionType) {
+            const inputElement = taskInputs[sectionType];
+            const taskText = inputElement.value.trim();
+            if (!taskText) {
+                alert('Please enter a task.');
+                return;
+            }
+
+            // Ensure the tasksData structure for the current date and section exists
+            if (!tasksData[currentDate]) {
+                tasksData[currentDate] = { study: [], skill: [], necessary: [] };
+            }
+            if (!tasksData[currentDate][sectionType]) {
+                tasksData[currentDate][sectionType] = [];
+            }
+
+            tasksData[currentDate][sectionType].push({ text: taskText, done: false });
+            inputElement.value = ''; // Clear the input field
+            await saveTasks(); // Save changes to Firestore
+            renderTasks(sectionType); // Re-render tasks for the specific section
+            updateProgressBar(sectionType); // Update progress bar
+            console.log(`Task added to ${sectionType}: ${taskText}`); // Debugging
+        }
+
+        /**
+         * Toggles the 'done' status of a task.
+         * @param {string} sectionType - The type of section.
+         * @param {number} index - The index of the task in the array.
+         * @async
+         */
+        async function toggleTaskDone(sectionType, index) {
+            if (tasksData[currentDate] && tasksData[currentDate][sectionType] && tasksData[currentDate][sectionType][index]) {
+                tasksData[currentDate][sectionType][index].done = !tasksData[currentDate][sectionType][index].done;
+                await saveTasks();
+                renderTasks(sectionType);
+                updateProgressBar(sectionType); // This will now trigger the congratulations if 100%
+                console.log(`Task toggled in ${sectionType} at index ${index}`); // Debugging
+            }
+        }
+
+        /**
+         * Edits a task. Replaces the task text with an input field for editing.
+         * @param {string} sectionType - The type of section.
+         * @param {number} index - The index of the task in the array.
+         * @param {HTMLElement} taskSpanElement - The <span> element containing the task text.
+         */
+        function editTask(sectionType, index, taskSpanElement) {
+            const originalText = tasksData[currentDate][sectionType][index].text;
+
+            // Create an input field for editing
+            const editInput = document.createElement('input');
+            editInput.type = 'text';
+            editInput.value = originalText;
+            editInput.className = 'flex-grow p-1 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400';
+
+            // Replace the span with the input field
+            taskSpanElement.replaceWith(editInput);
+            editInput.focus(); // Focus on the input field
+
+            // Function to save the edited task
+            const saveEditedTask = async () => {
+                const newText = editInput.value.trim();
+                if (newText && newText !== originalText) {
+                    tasksData[currentDate][sectionType][index].text = newText;
+                    await saveTasks();
+                    renderTasks(sectionType); // Re-render the list item
+                    console.log(`Task edited in ${sectionType}: ${newText}`);
+                } else if (newText === '') {
+                    // If the user clears the text, treat it as a cancellation or prompt to delete
+                    alert('Task text cannot be empty. Please enter a value or delete the task.');
+                    // Revert to original text if empty
+                    renderTasks(sectionType);
+                } else {
+                    // If no change, just revert the UI without saving
+                    renderTasks(sectionType);
+                }
+            };
+
+            // Event listeners for saving
+            editInput.addEventListener('blur', saveEditedTask); // Save when input loses focus
+            editInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault(); // Prevent new line in input
+                    saveEditedTask();
+                } else if (e.key === 'Escape') {
+                    // Revert to original text if Escape is pressed
+                    renderTasks(sectionType);
+                }
+            });
+        }
+
+
+        /**
+         * Deletes a task from the specified section with double confirmation.
+         * @param {string} sectionType - The type of section.
+         * @param {number} index - The index of the task to delete.
+         */
+        function deleteTask(sectionType, index) {
+            if (confirm('Are you sure you want to delete this task?')) { // প্রথম কনফার্মেশন
+                if (confirm('This action cannot be undone. Confirm deletion?')) { // দ্বিতীয় কনফার্মেশন
+                    if (tasksData[currentDate] && tasksData[currentDate][sectionType] && tasksData[currentDate][sectionType][index]) {
+                        tasksData[currentDate][sectionType].splice(index, 1);
+                        saveTasks(); // Save changes to Firestore
+                        renderTasks(sectionType);
+                        updateProgressBar(sectionType); // This will also check for 100% completion
+                        alert('Task deleted successfully.');
+                        console.log(`Task deleted from ${sectionType} at index ${index}`); // Debugging
+                    }
+                } else {
+                    alert('Deletion cancelled.');
+                }
+            } else {
+                alert('Deletion cancelled.');
+            }
+        }
+
+        /**
+         * Renders (or re-renders) the tasks for a given section.
+         * Clears the existing list and appends new list items based on current data.
+         * Adds drag and drop event listeners to each task item.
+         * Also adds a numbering to each task.
+         * @param {string} sectionType - The type of section ('study', 'skill', 'necessary').
+         */
+        function renderTasks(sectionType) {
+            const listElement = taskLists[sectionType];
+            listElement.innerHTML = ''; // Clear current list
+
+            const tasks = tasksData[currentDate] ? tasksData[currentDate][sectionType] || [] : [];
+
+            tasks.forEach((task, index) => {
+                const listItem = document.createElement('li');
+                listItem.className = `task-item ${task.done ? 'done' : ''}`;
+                listItem.setAttribute('draggable', 'true'); // Make task item draggable
+                listItem.dataset.index = index; // Store original index
+                listItem.dataset.sectionType = sectionType; // Store section type
+
+                // Add task number
+                const taskNumberSpan = document.createElement('span');
+                taskNumberSpan.className = 'task-number';
+                taskNumberSpan.textContent = `${index + 1}.`; // 1-based numbering
+                listItem.appendChild(taskNumberSpan);
+
+                // Modified: taskTextSpan now uses 'task-text-span' class for multiline display
+                const taskTextSpan = document.createElement('span');
+                taskTextSpan.className = 'task-text-span';
+                taskTextSpan.textContent = task.text;
+                // Removed: taskTextSpan.setAttribute('data-full-text', task.text);
+
+                listItem.appendChild(taskTextSpan);
+
+                const buttonsDiv = document.createElement('div');
+                buttonsDiv.className = 'flex items-center gap-2';
+
+                // Toggle Done Button
+                const toggleButton = document.createElement('button');
+                toggleButton.className = 'icon-button toggle-button';
+                toggleButton.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucude-check-circle"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                `;
+                toggleButton.onclick = () => toggleTaskDone(sectionType, index);
+                buttonsDiv.appendChild(toggleButton);
+
+                // Edit Button
+                const editButton = document.createElement('button');
+                editButton.className = 'icon-button edit-button';
+                editButton.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-edit"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+                `;
+                editButton.onclick = (event) => { // Added event parameter
+                    event.stopPropagation(); // Prevent full text modal from opening when editing
+                    editTask(sectionType, index, taskTextSpan);
+                };
+                buttonsDiv.appendChild(editButton);
+
+                // Delete Button
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'icon-button delete-button';
+                deleteButton.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-trash-2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                `;
+                deleteButton.onclick = (event) => { // Added event parameter
+                    event.stopPropagation(); // Prevent full text modal from opening when deleting
+                    deleteTask(sectionType, index);
+                };
+                buttonsDiv.appendChild(deleteButton);
+
+                listItem.appendChild(buttonsDiv);
+                listElement.appendChild(listItem);
+            });
+
+            // Add drag and drop event listeners to the list container itself
+            listElement.addEventListener('dragstart', handleDragStart);
+            listElement.addEventListener('dragover', handleDragOver);
+            listElement.addEventListener('dragleave', handleDragLeave);
+            listElement.addEventListener('drop', handleDrop);
+            listElement.addEventListener('dragend', handleDragEnd);
+        }
+
+        /**
+         * Renders all task sections (study, skill, necessary).
+         */
+        function renderAllTasks() {
+            renderTasks('study');
+            renderTasks('skill');
+            renderTasks('necessary');
+        }
+
+        /**
+         * Updates the progress bar for a given section with emojis.
+         * @param {string} sectionType - The type of section ('study', 'skill', 'necessary').
+         */
+        function updateProgressBar(sectionType) {
+            const progressBarFill = progressBars[sectionType].fill;
+            const progressBarText = progressBars[sectionType].text;
+
+            if (!tasksData[currentDate] || !tasksData[currentDate][sectionType]) {
+                progressBarFill.style.width = '0%';
+                progressBarText.textContent = '0% 😔'; // Sad emoji for 0%
+                progressBarText.style.color = '#4a5568'; // Default color
+                return;
+            }
+            const tasks = tasksData[currentDate][sectionType];
+            const doneCount = tasks.filter(t => t.done).length;
+            const percent = tasks.length ? Math.round((doneCount / tasks.length) * 100) : 0;
+
+            progressBarFill.style.width = percent + '%';
+
+            let emoji = '';
+            if (percent === 0) {
+                emoji = '😔'; // Sad
+                progressBarText.style.color = '#4a5568'; // Default color
+            } else if (percent > 0 && percent <= 20) {
+                emoji = '🙁'; // Slightly sad
+                progressBarText.style.color = '#4a5568'; // Default color
+            } else if (percent > 20 && percent <= 40) {
+                emoji = '😐'; // Neutral
+                progressBarText.style.color = '#4a5568'; // Default color
+            } else if (percent > 40 && percent <= 60) {
+                emoji = '🙂'; // Slightly happy
+                progressBarText.style.color = '#4a5568'; // Default color
+            } else if (percent > 60 && percent <= 80) {
+                emoji = '😊'; // Happy
+                progressBarText.style.color = '#4a5568'; // Default color
+            } else if (percent > 80 && percent < 100) {
+                emoji = '😁'; // Very happy
+                progressBarText.style.color = '#4a5568'; // Default color
+            } else if (percent === 100) {
+                emoji = '🎉'; // Party popper for completion
+                progressBarText.style.color = 'white'; // White color for 100%
+            }
+
+            progressBarText.textContent = percent + '% ' + emoji;
+
+            // Check for 100% completion and trigger celebration
+            if (percent === 100 && tasks.length > 0 && !tasksData[currentDate][sectionType].celebrated) {
+                showCongratulationsModal();
+                tasksData[currentDate][sectionType].celebrated = true;
+                saveTasks();
+            } else if (percent < 100 && tasksData[currentDate][sectionType].celebrated) {
+                tasksData[currentDate][sectionType].celebrated = false;
+                saveTasks();
+            }
+        }
+
+        /**
+         * Updates all progress bars.
+         */
+        function updateAllProgressBars() {
+            updateProgressBar('study');
+            updateProgressBar('skill');
+            updateProgressBar('necessary');
+        }
+
+
+        /**
+         * Renders buttons for all dates that have saved tasks from Firestore.
+         * Allows quick switching between different dates.
+         * @async
+         */
+        async function renderSavedDates() {
+            showLoading();
+            try {
+                if (typeof db === 'undefined' || db === null) { // Added check
+                    throw new Error("Firestore database (db) not initialized for rendering saved dates.");
+                }
+                const snapshot = await db.collection("tasks").get(); // Fetch all documents from 'tasks' collection
+                const dates = snapshot.docs
+                    .filter(doc => {
+                        const data = doc.data();
+                        // Check if any task list has items
+                        return (data.study && data.study.length > 0) ||
+                            (data.skill && data.skill.length > 0) ||
+                            (data.necessary && data.necessary.length > 0) ||
+                            (data.self && data.self.length > 0); // Keep checking for old 'self' for migration purposes
+                    })
+                    .map(doc => doc.id)
+                    .sort(); // Sort dates chronologically
+
+                savedDatesContainer.innerHTML = ''; // Clear existing buttons
+
+                dates.forEach(date => {
+                    const dateItem = document.createElement('div');
+                    dateItem.className = 'saved-date-item';
+
+                    const dateButton = document.createElement('button');
+                    dateButton.className = `date-button ${date === currentDate ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`;
+                    dateButton.textContent = formatDateForDisplay(date);
+                    dateButton.onclick = () => loadTasksForDate(date);
+
+                    const deleteButton = document.createElement('button');
+                    deleteButton.className = 'icon-button delete-button';
+                    deleteButton.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x-circle">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="m15 9-6 6"/>
+                            <path d="m9 9 6 6"/>
+                        </svg>
+                    `;
+                    deleteButton.title = `Delete all tasks for ${formatDateForDisplay(date)}`;
+                    deleteButton.onclick = (event) => {
+                        event.stopPropagation(); // Prevent loadTasksForDate from being called
+                        deleteDateEntry(date);
+                    };
+
+                    dateItem.appendChild(dateButton);
+                    dateItem.appendChild(deleteButton);
+                    savedDatesContainer.appendChild(dateItem);
+                });
+            } catch (e) {
+                console.error("Error rendering saved dates: ", e);
+                alert("Error displaying saved dates. See console for details.");
+            } finally {
+                hideLoading();
+            }
+        }
+
+        /**
+         * Deletes all tasks for a specific date from Firestore.
+         * Prompts for confirmation twice.
+         * @param {string} dateToDelete - The date string (YYYY-MM-DD) to delete.
+         * @async
+         */
+        async function deleteDateEntry(dateToDelete) {
+            if (confirm(`Are you sure you want to delete ALL tasks for ${formatDateForDisplay(dateToDelete)}?`)) {
+                if (confirm(`This will permanently delete all tasks for ${formatDateForDisplay(dateToDelete)}. This action cannot be undone. Confirm?`)) {
+                    showLoading();
+                    try {
+                        await db.collection("tasks").doc(dateToDelete).delete();
+                        console.log(`Successfully deleted tasks for date: ${dateToDelete}`);
+                        delete tasksData[dateToDelete]; // Remove from local cache
+                        renderSavedDates(); // Re-render saved dates list
+
+                        // If the deleted date was the currently selected date, load today's tasks
+                        if (currentDate === dateToDelete) {
+                            currentDate = formatDate(new Date()); // Set to today
+                            await loadTasksForDate(currentDate); // Load today's tasks
+                        } else {
+                            // Otherwise, just re-render the current date's tasks to ensure UI is consistent
+                            renderAllTasks();
+                            updateAllProgressBars();
+                        }
+                        alert(`All tasks for ${formatDateForDisplay(dateToDelete)} have been deleted.`);
+                    } catch (e) {
+                        console.error("Error deleting date entry: ", e);
+                        alert(`Error deleting tasks for ${formatDateForDisplay(dateToDelete)}. See console for details.`);
+                    } finally {
+                        hideLoading();
+                    }
+                } else {
+                    alert('Deletion cancelled.');
+                }
+            } else {
+                alert('Deletion cancelled.');
+            }
+        }
+
+        // --- Drag and Drop Handlers ---
+
+        function handleDragStart(e) {
+            draggedItem = e.target.closest('.task-item'); // Get the task-item li
+            if (!draggedItem) return;
+
+            originalSectionType = draggedItem.dataset.sectionType;
+            originalIndex = parseInt(draggedItem.dataset.index);
+
+            e.dataTransfer.effectAllowed = 'move';
+            // Set data for transfer (section type and index)
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+                sectionType: originalSectionType,
+                index: originalIndex
+            }));
+
+            // Add a class to the dragged item for styling
+            setTimeout(() => {
+                draggedItem.classList.add('dragging');
+            }, 0); // Use setTimeout to apply class after dataTransfer is set
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault(); // Necessary to allow drop
+            const target = e.target.closest('.task-item');
+            const currentList = e.currentTarget; // The ul where drag is happening
+
+            // Add drag-over class to the current list if it's a valid drop target
+            if (currentList.tagName === 'UL') {
+                currentList.classList.add('drag-over');
+            }
+
+            // Visual feedback for reordering within the same list
+            if (target && target !== draggedItem && target.classList.contains('task-item')) {
+                const bounding = target.getBoundingClientRect();
+                const offset = bounding.y + (bounding.height / 2);
+
+                // Determine if we are above or below the center of the target
+                if (e.clientY - offset > 0) {
+                    // Dragging over bottom half, insert after
+                    if (target.nextSibling !== draggedItem) {
+                        currentList.insertBefore(draggedItem, target.nextSibling);
+                    }
+                } else {
+                    // Dragging over top half, insert before
+                    if (target.previousSibling !== draggedItem) {
+                        currentList.insertBefore(draggedItem, target);
+                    }
+                }
+            }
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        async function handleDrop(e) {
+            e.preventDefault();
+            const currentList = e.currentTarget; // The ul where drop happened
+            currentList.classList.remove('drag-over'); // Remove visual feedback
+
+            if (!draggedItem) return;
+
+            const droppedSectionType = currentList.id.replace('-list', ''); // 'study', 'skill', 'necessary'
+            const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+            const oldSectionType = data.sectionType;
+            const oldIndex = data.index;
+
+            // Get the current order of tasks in the target list after visual reordering
+            const newOrderElements = Array.from(currentList.children);
+            const newIndex = newOrderElements.indexOf(draggedItem);
+
+            // If the item was dropped outside a valid list or back into itself without reordering
+            if (newIndex === -1 && oldSectionType === droppedSectionType) {
+                // If the item was dragged within the same list but not dropped on a specific item
+                // or if it was dropped back to its original visual position, don't re-arrange
+                renderTasks(oldSectionType); // Just re-render to reset visual
+                return;
+            }
+
+            // Perform the data model update
+            const task = tasksData[currentDate][oldSectionType].splice(oldIndex, 1)[0]; // Remove from old position
+
+            if (!tasksData[currentDate][droppedSectionType]) {
+                tasksData[currentDate][droppedSectionType] = [];
+            }
+
+            // Insert into new position
+            tasksData[currentDate][droppedSectionType].splice(newIndex, 0, task);
+
+            await saveTasks();
+            renderAllTasks(); // Re-render all lists to ensure correct numbering and state
+            updateAllProgressBars();
+            console.log(`Task moved from ${oldSectionType} (index ${oldIndex}) to ${droppedSectionType} (index ${newIndex})`);
+        }
+
+        function handleDragEnd(e) {
+            // Clean up: remove dragging class from the dragged item
+            if (draggedItem) {
+                draggedItem.classList.remove('dragging');
+                draggedItem = null;
+            }
+            // Remove drag-over class from all lists
+            for (const key in taskLists) {
+                taskLists[key].classList.remove('drag-over');
+            }
+        }
+
+
+        // --- Modals related functions ---
+
+        /**
+         * Opens the Reading Funnel modal.
+         */
+        function openReadingFunnelModal() {
+            readingFunnelModal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden'; // Prevent scrolling of the background body
+        }
+
+        /**
+         * Closes the Reading Funnel modal.
+         */
+        function closeReadingFunnelModal() {
+            readingFunnelModal.classList.add('hidden');
+            document.body.style.overflow = ''; // Restore scrolling of the background body
+        }
+
+        /**
+         * Shows the congratulations modal and triggers confetti.
+         */
+        function showCongratulationsModal() {
+            congratulationsModal.classList.add('visible');
+
+            // Initialize audio if not already done
+            if (!congratsAudio) {
+                congratsAudio = new Audio('assets/sounds/congrats.mp3');
+                congratsAudio.load(); // Start loading the audio
+                congratsAudio.volume = 0.5; // Set a default volume
+            }
+
+            // Play sound when it's ready
+            congratsAudio.play().catch(error => {
+                console.error("Audio playback failed:", error);
+                // This might happen if the browser blocks autoplay without user interaction
+                // You could add a user interaction prompt here if needed.
+            });
+
+            launchConfetti();
+        }
+
+        /**
+         * Closes the congratulations modal.
+         */
+        function closeCongratulationsModal() {
+            congratulationsModal.classList.remove('visible');
+            // Optionally stop the audio if it's still playing
+            if (congratsAudio && !congratsAudio.paused) {
+                congratsAudio.pause();
+                congratsAudio.currentTime = 0; // Reset audio to start
+            }
+        }
+
+        // --- Confetti Effect ---
+        const confettiColors = ['#f06', '#0cf', '#fc0', '#c0f', '#0fc'];
+
+        function launchConfetti() {
+            const confettiContainer = document.getElementById('confetti-container');
+            if (!confettiContainer) return;
+
+            // Clear any existing confetti
+            confettiContainer.innerHTML = '';
+
+            const numberOfConfetti = 50; // Adjust as needed
+            for (let i = 0; i < numberOfConfetti; i++) {
+                const confetti = document.createElement('div');
+                confetti.classList.add('confetti');
+                confetti.style.backgroundColor = confettiColors[Math.floor(Math.random() * confettiColors.length)];
+
+                // Random starting position and animation properties
+                const startX = Math.random() * window.innerWidth;
+                const startY = -Math.random() * window.innerHeight; // Start from above the screen
+                const endX = startX + (Math.random() - 0.5) * 400; // Drift left/right
+                const rotateSpeed = Math.random() * 720 + 360; // More rotation
+                const delay = Math.random() * 1.5; // Stagger animation start
+
+                confetti.style.setProperty('--confetti-start-x', `${startX}px`);
+                confetti.style.setProperty('--confetti-start-y', `${startY}px`);
+                confetti.style.setProperty('--confetti-end-x', `${endX}px`);
+                confetti.style.setProperty('--rotate-speed', `${rotateSpeed}deg`);
+                confetti.style.animationDelay = `${delay}s`;
+                confetti.style.left = `${startX}px`; // Set initial left
+                confetti.style.top = `${startY}px`; // Set initial top
+
+                confettiContainer.appendChild(confetti);
+
+                // Remove confetti after animation to prevent DOM bloat
+                confetti.addEventListener('animationend', () => {
+                    confetti.remove();
+                });
+            }
+        }
+
+
+        // Event Listeners
+        openReadingFunnelBtn.addEventListener('click', openReadingFunnelModal);
+        closeReadingFunnelBtn.addEventListener('click', closeReadingFunnelModal);
+
+        datePicker.addEventListener('change', (event) => {
+            loadTasksForDate(event.target.value);
+        });
+
+        // Initial load logic
+        document.addEventListener('DOMContentLoaded', async () => {
+            showLoading();
+
+            const today = new Date();
+            currentDate = formatDate(today); // Set current date to today's date initially
+            datePicker.value = currentDate; // Set date picker to today
+
+            await loadTasksForDate(currentDate); // Load tasks for today
+            hideLoading();
+        });
+
+        // Event listeners for adding tasks when Enter key is pressed
+        taskInputs.study.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                addTask('study');
+            }
+        });
+        taskInputs.skill.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                addTask('skill');
+            }
+        });
+        taskInputs.necessary.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                addTask('necessary');
+            }
+        });
+
+    </script>
+</body>
+
+</html>
