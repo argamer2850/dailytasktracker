@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="bn">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Task Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+
+    <style>
+        /* Custom styles for background and font */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-image: url('https://source.unsplash.com/random/1920x1080/?nature,mountain,forest,lake');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+            background-color: #f8f8f8;
+            /* Default background for light mode */
+            color: #333;
+            /* Default text color for light mode */
+        }
+
+        /* Main container styling for better readability and visual appeal */
+        .task-container {
+            background-color: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(5px);
+            border-radius: 1rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            margin: auto;
+            /* Center the container */
+            z-index: 10;
+            position: relative;
+        }
+
+        /* Task item styling */
+        .task-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background-color: #f9fafb;
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
+            transition: all 0.2s ease-in-out;
+            border: 1px solid #e5e7eb;
+            /* Default border */
+        }
+
+        .task-item.done {
+            text-decoration: line-through;
+            color: #6b7280;
+            background-color: #d1fae5;
+            /* Noticeably light green for done tasks */
+            border-color: #34d399;
+            /* Green border for done tasks */
+            opacity: 0.8;
+        }
+
+        .task-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Input group for adding tasks */
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .input-group input[type="text"] {
+            flex-grow: 1;
+            border: 1px solid #d1d5db;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .input-group button {
+            background-color: #4f46e5;
+            color: white;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .input-group button:hover {
+            background-color: #4338ca;
+        }
+
+        /* Icon buttons for toggle/delete actions */
+        .icon-button {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            border-radius: 0.25rem;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .icon-button:hover {
+            background-color: #e5e7eb;
+        }
+
+        .icon-button svg {
+            width: 1.25rem;
+            height: 1.25rem;
+            color: #6b7280;
+        }
+
+        .icon-button.delete-button svg {
+            color: #ef4444;
+        }
+
+        .icon-button.delete-button:hover svg {
+            color: #dc2626;
+        }
+
+        .icon-button.toggle-button svg {
+            color: #10b981;
+        }
+
+        .icon-button.toggle-button:hover svg {
+            color: #059669;
+        }
+
+        /* Styling for saved date buttons */
+        .saved-date-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .saved-date-item .date-button {
+            flex-grow: 1;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            line-height: 1.25rem;
+            font-weight: 500;
+            text-align: center;
+            border-radius: 0.5rem;
+            transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+            transition-duration: 200ms;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+
+        /* Responsive grid for task sections */
+        @media (min-width: 768px) {
+            .task-sections-grid {
+                grid-template-columns: repeat(3, 1fr);
+                align-items: start;
+            }
+        }
+
+        /* Modal overlay */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-body {
+            overflow-y: auto;
+            flex-grow: 1;
+            padding-right: 0.5rem;
+        }
+
+        /* Custom scrollbar for modal */
+        .modal-body::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .modal-body::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        .modal-body::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+
+        .modal-body::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* Progress bar styling */
+        .progress-bar-container {
+            width: 100%;
+            background-color: #e2e8f0;
+            border-radius: 9999px;
+            height: 1.5rem;
+            overflow: hidden;
+            margin-bottom: 1rem;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #4f46e5;
+            border-radius: 9999px;
+            transition: width 0.5s ease-in-out;
+        }
+
+        .progress-bar-text {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4a5568;
+            font-size: 0.875rem;
+            font-weight: bold;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+
+        /* Specific colors for each progress bar */
+        #study-progress-fill {
+            background-color: #3b82f6;
+        }
+
+        #skill-progress-fill {
+            background-color: #22c55e;
+        }
+
+        #necessary-progress-fill {
+            background-color: #a855f7;
+        }
+
+        /* Loading Spinner */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #4f46e5;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Hide main content when not authenticated */
+        .main-content-wrapper {
+            display: none;
+            /* Hidden by default */
+        }
+
+        .main-content-wrapper.authenticated {
+            display: flex;
+            /* Show when authenticated */
+        }
+
+        /* Login Modal specific styles */
+        .login-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1001;
+            /* Higher z-index than reading funnel modal */
+        }
+
+        .login-modal-content {
+            background-color: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            padding: 2rem;
+            width: 90%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .login-modal-content input {
+            padding: 0.75rem 1rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .login-modal-content button {
+            background-color: #4f46e5;
+            color: white;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: background-color 0.2s ease-in-out;
+            cursor: pointer;
+        }
+
+        .login-modal-content button:hover {
+            background-color: #4338ca;
+        }
+
+        .login-modal-content .text-red-500 {
+            color: #ef4444;
+            font-size: 0.875rem;
+        }
+
+
+        /* Success Modal Styles */
+        #success-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1002;
+            /* Higher than other modals */
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+
+        #success-modal-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        #success-modal-content {
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+            padding: 2rem;
+            text-align: center;
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        #success-modal-overlay.show #success-modal-content {
+            transform: scale(1);
+        }
+
+        #success-modal-content h3 {
+            font-size: 2.25rem;
+            font-weight: bold;
+            color: #22c55e;
+            /* Green color for success */
+            margin-bottom: 1rem;
+        }
+
+        #success-modal-content p {
+            font-size: 1.25rem;
+            color: #4a5568;
+            margin-bottom: 1.5rem;
+        }
+
+        #success-modal-content button {
+            background-color: #22c55e;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        #success-modal-content button:hover {
+            background-color: #16a34a;
+        }
+
+        /* Confetti animation */
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #ffeb3b;
+            /* yellow */
+            opacity: 0;
+            animation: confetti-fall 3s forwards ease-out;
+            border-radius: 50%;
+        }
+
+        .confetti:nth-child(2n) {
+            background-color: #ff9800;
+            /* orange */
+        }
+
+        .confetti:nth-child(3n) {
+            background-color: #f44336;
+            /* red */
+        }
+
+        .confetti:nth-child(4n) {
+            background-color: #2196f3;
+            /* blue */
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translate(0, 0) rotate(0deg);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(var(--x), var(--y)) rotate(var(--deg));
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100">
+
+    <div id="login-modal-overlay" class="login-modal-overlay">
+        <div class="login-modal-content">
+            <h2 class="text-2xl font-bold text-gray-800 text-center">Login</h2>
+            <input type="email" id="login-email" placeholder="Email" class="w-full">
+            <input type="password" id="login-password" placeholder="Password" class="w-full">
+            <button id="login-submit-btn">Login</button>
+            <p id="login-error-message" class="text-red-500 text-center hidden"></p>
+        </div>
+    </div>
+
+    <div id="main-content-wrapper" class="task-container main-content-wrapper">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-4">Daily Task Tracker</h1>
+            <div class="flex flex-col md:flex-row items-center justify-center gap-4">
+                <label for="date-picker" class="text-lg font-medium text-gray-700">Select Date:</label>
+                <input type="date" id="date-picker"
+                    class="p-3 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500 text-lg">
+
+                <button id="open-reading-funnel-btn"
+                    class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 ease-in-out">
+                    Reading Funnel
+                </button>
+                <button id="login-logout-btn"
+                    class="px-6 py-3 bg-red-700 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 ease-in-out">
+                    Logout
+                </button>
+            </div>
+        </header>
+
+        <section class="mb-6">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-3">Saved Entries</h2>
+            <div id="saved-dates-container" class="flex flex-wrap gap-2 justify-center">
+            </div>
+        </section>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 task-sections-grid">
+            <section class="bg-blue-50 p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold text-blue-800 mb-4 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-book-open-text">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                        <path d="M10 12H8" />
+                        <path d="M16 12h2" />
+                        <path d="M16 18h2" />
+                        <path d="M16 15h2" />
+                        <path d="M10 18H8" />
+                        <path d="M10 15H8" />
+                    </svg>
+                    Study List
+                </h2>
+                <div class="progress-bar-container">
+                    <div id="study-progress-fill" class="progress-bar-fill"></div>
+                    <div id="study-progress-text" class="progress-bar-text">0%</div>
+                </div>
+                <div class="input-group mb-4">
+                    <input type="text" id="study-input" placeholder="Add a new study task..." class="w-full">
+                    <button onclick="addTask('study')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="lucide lucide-plus">
+                            <path d="M12 5v14" />
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+                </div>
+                <ul id="study-list" class="space-y-2">
+                </ul>
+            </section>
+
+            <section class="bg-green-50 p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold text-green-800 mb-4 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-lightbulb">
+                        <path
+                            d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 6c0 1.3.5 2.6 1.5 3.5.8.7 1.3 1.5 1.5 2.5" />
+                        <path d="M9 18h6" />
+                        <path d="M10 22h4" />
+                        <path d="M11 18v4" />
+                        <path d="M7 18h2" />
+                    </svg>
+                    Skill Development
+                </h2>
+                <div class="progress-bar-container">
+                    <div id="skill-progress-fill" class="progress-bar-fill"></div>
+                    <div id="skill-progress-text" class="progress-bar-text">0%</div>
+                </div>
+                <div class="input-group mb-4">
+                    <input type="text" id="skill-input" placeholder="Add a new skill task..." class="w-full">
+                    <button onclick="addTask('skill')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="lucide lucide-plus">
+                            <path d="M12 5v14" />
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+                </div>
+                <ul id="skill-list" class="space-y-2">
+                </ul>
+            </section>
+
+            <section class="bg-purple-50 p-6 rounded-lg shadow-md">
+                <h2 class="text-2xl font-bold text-purple-800 mb-4 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-clipboard-list">
+                        <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                        <path d="M12 11h4" />
+                        <path d="M12 16h4" />
+                        <path d="M8 11h.01" />
+                        <path d="M8 16h.01" />
+                    </svg>
+                    Necessary Work
+                </h2>
+                <div class="progress-bar-container">
+                    <div id="necessary-progress-fill" class="progress-bar-fill"></div>
+                    <div id="necessary-progress-text" class="progress-bar-text">0%</div>
+                </div>
+                <div class="input-group mb-4">
+                    <input type="text" id="necessary-input" placeholder="Add a new necessary task..." class="w-full">
+                    <button onclick="addTask('necessary')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="lucide lucide-plus">
+                            <path d="M12 5v14" />
+                            <path d="M5 12h14" />
+                        </svg>
+                    </button>
+                </div>
+                <ul id="necessary-list" class="space-y-2">
+                </ul>
+            </section>
+        </div>
+    </div>
+
+    <div id="reading-funnel-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="flex justify-between items-center pb-4 border-b border-gray-200 mb-4">
+                <h3 class="text-2xl font-bold text-gray-800">Reading Funnel</h3>
+                <button id="close-reading-funnel-btn"
+                    class="text-gray-500 hover:text-gray-800 transition-colors duration-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        class="lucide lucide-x">
+                        <path d="M18 6 6 18" />
+                        <path d="m6 6 12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div id="reading-funnel-content" class="modal-body text-gray-700 leading-relaxed">
+                <p><strong class="font-bold">Physics, Chemistry, Biology:</strong> Board book, Netter, Quick
+                    Preparation,
+                    Supplement (Except Biology), FT Sugg Book, QNA</p>
+                <p><strong class="font-bold">English 1st Paper:</strong> Board book, Netter</p>
+                <p><strong class="font-bold">English 2nd Paper:</strong> Advanced Learners, Quick Preparation, Netter
+                </p>
+                <p><strong class="font-bold">General Math, Higher Math:</strong> Board book with math solving from guide
+                    (especially Secret of CQ), Netter, Quick Prep, FT Sugg Book, QNA</p>
+                <p><strong class="font-bold">Bangla 1st Paper, Bangla 2nd Paper, BGS, ICT:</strong> Board book, Netter,
+                    Quick Prep, Made Easy MCQ, FT Sugg Book, QNA</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="success-modal-overlay" class="success-modal-overlay hidden">
+        <div id="success-modal-content" class="success-modal-content">
+            <h3 id="success-modal-title"></h3>
+            <p id="success-modal-message"></p>
+            <button id="close-success-modal-btn">Awesome!</button>
+        </div>
+    </div>
+
+
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+    </div>
+
+    <audio id="success-audio" src="assets/sounds/congrats.mp3" preload="auto"></audio>
+
+    <script>
+        // Firebase Configuration (Replace with your actual Firebase config)
+        const firebaseConfig = {
+            apiKey: "AIzaSyCdVXY8feu2uiW_JVv0tOtN1MMKztCcrTU",
+            authDomain: "dailytasktracker-817d5.firebaseapp.com",
+            projectId: "dailytasktracker-817d5",
+            storageBucket: "dailytasktracker-817d5.firebasestorage.app",
+            messagingSenderId: "471139809864",
+            appId: "1:471139809864:web:2d98f777906b94810cb67d"
+        };
+
+        // Firebase অ্যাপ শুরু করা
+        const app = firebase.initializeApp(firebaseConfig);
+        // Firestore ডাটাবেস ব্যবহার করার জন্য
+        const db = firebase.firestore();
+        // Firebase Auth ব্যবহার করার জন্য
+        const auth = firebase.auth();
+
+        // Global variables
+        let currentDate; // Stores the currently selected date (YYYY-MM-DD)
+        let tasksData = {}; // Stores tasks for the current date loaded from Firestore
+        let currentUserId = null; // Stores the current logged-in user's UID or null if not logged in
+
+        // DOM element references
+        const datePicker = document.getElementById('date-picker');
+        const savedDatesContainer = document.getElementById('saved-dates-container');
+        const loginLogoutBtn = document.getElementById('login-logout-btn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loginModalOverlay = document.getElementById('login-modal-overlay');
+        const mainContentWrapper = document.getElementById('main-content-wrapper');
+        const loginEmailInput = document.getElementById('login-email');
+        const loginPasswordInput = document.getElementById('login-password');
+        const loginSubmitBtn = document.getElementById('login-submit-btn');
+        const loginErrorMessage = document.getElementById('login-error-message');
+
+        // Success Modal elements
+        const successModalOverlay = document.getElementById('success-modal-overlay');
+        const successModalTitle = document.getElementById('success-modal-title');
+        const successModalMessage = document.getElementById('success-modal-message');
+        const closeSuccessModalBtn = document.getElementById('close-success-modal-btn');
+
+
+        // Task list elements for each section
+        const taskLists = {
+            study: document.getElementById('study-list'),
+            skill: document.getElementById('skill-list'),
+            necessary: document.getElementById('necessary-list')
+        };
+
+        // Task input elements for each section
+        const taskInputs = {
+            study: document.getElementById('study-input'),
+            skill: document.getElementById('skill-input'),
+            necessary: document.getElementById('necessary-input')
+        };
+
+        // Progress bar elements
+        const progressBars = {
+            study: {
+                fill: document.getElementById('study-progress-fill'),
+                text: document.getElementById('study-progress-text')
+            },
+            skill: {
+                fill: document.getElementById('skill-progress-fill'),
+                text: document.getElementById('skill-progress-text')
+            },
+            necessary: {
+                fill: document.getElementById('necessary-progress-fill'),
+                text: document.getElementById('necessary-progress-text')
+            }
+        };
+
+        // Modal elements
+        const openReadingFunnelBtn = document.getElementById('open-reading-funnel-btn');
+        const readingFunnelModal = document.getElementById('reading-funnel-modal');
+        const closeReadingFunnelBtn = document.getElementById('close-reading-funnel-btn');
+
+        /**
+         * Initializes the application on page load.
+         * Sets the date picker to the current date, loads tasks, and renders saved dates.
+         */
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set the date picker to today's date by default
+            const today = new Date();
+            currentDate = formatDate(today);
+            datePicker.value = currentDate;
+
+            // Firebase Authentication Persistence সেট করা
+            // LOCAL মানে ব্রাউজার বন্ধ করলেও সেশন থাকবে
+            auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+                .then(() => {
+                    console.log("Auth persistence set to LOCAL.");
+                })
+                .catch((error) => {
+                    console.error("Error setting persistence:", error.message);
+                });
+
+
+            // Handle user login/logout state
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    currentUserId = user.uid;
+                    loginLogoutBtn.textContent = 'Logout';
+                    console.log('User logged in:', currentUserId);
+                    loginModalOverlay.style.display = 'none'; // Hide login modal
+                    mainContentWrapper.classList.add('authenticated'); // Show main content
+                    document.body.style.overflow = ''; // Restore body scrolling
+
+                    // Load tasks for today once logged in
+                    const today = new Date();
+                    currentDate = formatDate(today);
+                    datePicker.value = currentDate;
+                    loadTasksForDate(currentDate);
+                } else {
+                    // User is signed out.
+                    console.log("User logged out.");
+                    loginModalOverlay.style.display = 'flex'; // Show login modal
+                    mainContentWrapper.classList.remove('authenticated'); // Hide main content
+                    document.body.style.overflow = 'hidden'; // Prevent scrolling
+                    loginEmailInput.value = ''; // Clear inputs
+                    loginPasswordInput.value = '';
+                    loginErrorMessage.classList.add('hidden'); // Hide any error messages
+                    loginEmailInput.focus(); // Focus on email input
+
+                    // Clear local tasks data if logged out
+                    tasksData = {
+                        study: [],
+                        skill: [],
+                        necessary: []
+                    }; // Reset to empty arrays
+                    renderAllTasks(); // Clear UI lists
+                    updateAllProgressBars(); // Reset progress bars
+                    savedDatesContainer.innerHTML = ''; // Clear saved dates
+                }
+            });
+
+            // Add event listener for date picker changes
+            datePicker.addEventListener('change', (event) => {
+                const newDate = event.target.value;
+                if (newDate) {
+                    loadTasksForDate(newDate);
+                }
+            });
+
+            // Add event listener for Login/Logout button
+            loginLogoutBtn.addEventListener('click', async () => {
+                if (currentUserId) {
+                    // Log out
+                    await auth.signOut();
+                } else {
+                    // This button should actually be handled by the auth.onAuthStateChanged
+                    // which shows the modal. If we are here, it means we clicked "Login"
+                    // while logged out, so we'll just open the modal.
+                    loginModalOverlay.style.display = 'flex';
+                    loginEmailInput.focus();
+                }
+            });
+
+            // Handle login form submission
+            loginSubmitBtn.addEventListener('click', async () => {
+                const email = loginEmailInput.value.trim();
+                const password = loginPasswordInput.value.trim();
+                loginErrorMessage.classList.add('hidden'); // Hide previous errors
+
+                if (email && password) {
+                    try {
+                        await auth.signInWithEmailAndPassword(email, password);
+                        // Auth state change will be handled by onAuthStateChanged listener
+                    } catch (error) {
+                        console.error("Login failed:", error.message);
+                        loginErrorMessage.textContent = error.message;
+                        loginErrorMessage.classList.remove('hidden');
+                    }
+                } else {
+                    loginErrorMessage.textContent = "Email and password are required.";
+                    loginErrorMessage.classList.remove('hidden');
+                }
+            });
+
+            // Allow login on Enter key press in password field
+            loginPasswordInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    loginSubmitBtn.click();
+                }
+            });
+
+
+            // Add event listeners for the Reading Funnel modal
+            openReadingFunnelBtn.addEventListener('click', openReadingFunnelModal);
+            closeReadingFunnelBtn.addEventListener('click', closeReadingFunnelModal);
+            readingFunnelModal.addEventListener('click', (event) => {
+                if (event.target === readingFunnelModal) {
+                    closeReadingFunnelModal();
+                }
+            });
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape' && !readingFunnelModal.classList.contains('hidden')) {
+                    closeReadingFunnelModal();
+                }
+            });
+
+            // Event listeners for success modal
+            closeSuccessModalBtn.addEventListener('click', closeSuccessModal);
+            successModalOverlay.addEventListener('click', (event) => {
+                if (event.target === successModalOverlay) {
+                    closeSuccessModal();
+                }
+            });
+
+
+            // Event listeners for adding tasks when Enter key is pressed
+            taskInputs.study.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    addTask('study');
+                }
+            });
+            taskInputs.skill.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    addTask('skill');
+                }
+            });
+            taskInputs.necessary.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    addTask('necessary');
+                }
+            });
+        });
+
+        function showLoading() {
+            loadingOverlay.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            loadingOverlay.classList.add('hidden');
+        }
+
+        /**
+         * Formats a Date object into a YYYY-MM-DD string.
+         * @param {Date} date - The Date object to format.
+         * @returns {string} The formatted date string.
+         */
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        /**
+         * Formats a YYYY-MM-DD date string into a DD-MM-YYYY string for display.
+         * @param {string} dateString - The date string in YYYY-MM-DD format.
+         * @returns {string} The formatted date string in DD-MM-YYYY format.
+         */
+        function formatDateForDisplay(dateString) {
+            const [year, month, day] = dateString.split('-');
+            return `${day}-${month}-${year}`;
+        }
+
+        /**
+         * Loads tasks for a specific date from Firestore and updates the UI.
+         * If no tasks exist for the date, initializes an empty structure.
+         * @param {string} date - The date string (YYYY-MM-DD) to load tasks for.
+         */
+        async function loadTasksForDate(date) {
+            showLoading();
+            currentDate = date;
+            datePicker.value = currentDate;
+            console.log(`Attempting to load tasks for date: ${date}`);
+
+            try {
+                if (typeof db === 'undefined' || db === null) {
+                    throw new Error("Firestore database (db) not initialized. Check Firebase setup.");
+                }
+
+                // Determine which user's data to load.
+                const targetUserId = currentUserId;
+
+                if (!targetUserId) {
+                    console.log("No user ID found to load tasks. Displaying empty tasks.");
+                    tasksData = {
+                        study: [],
+                        skill: [],
+                        necessary: []
+                    };
+                    renderAllTasks();
+                    updateAllProgressBars();
+                    savedDatesContainer.innerHTML = ''; // Clear saved dates if not logged in
+                    hideLoading();
+                    return; // Exit if no user
+                }
+
+                const docRef = db.collection("users").doc(targetUserId).collection("tasks").doc(currentDate);
+                console.log(`Fetching document: users/${targetUserId}/tasks/${currentDate}`);
+                const doc = await docRef.get();
+
+                if (doc.exists) {
+                    tasksData = doc.data(); // Load all data for the current date into tasksData
+                    console.log("Document data received:", tasksData);
+                    // Migration: If 'self' exists but 'necessary' doesn't, migrate it
+                    if (tasksData.self && !tasksData.necessary) {
+                        console.log("Migrating 'self' tasks to 'necessary'.");
+                        tasksData.necessary = tasksData.self;
+                        delete tasksData.self;
+                        if (currentUserId) { // Only save if user is logged in
+                            await docRef.set(tasksData); // Save migrated data back to Firestore
+                            console.log("Migration complete and saved.");
+                        }
+                    }
+                } else {
+                    console.log(`No document found for date: ${date}. Initializing new data.`);
+                    tasksData = {
+                        study: [],
+                        skill: [],
+                        necessary: []
+                    };
+                    // If not logged in, we don't save an empty doc immediately.
+                    // It will be saved when the first task is added (which requires login).
+                }
+
+                // Ensure all sections exist, even if empty
+                if (!tasksData.study) tasksData.study = [];
+                if (!tasksData.skill) tasksData.skill = [];
+                if (!tasksData.necessary) tasksData.necessary = []; // Ensure necessary exists
+
+
+                renderAllTasks();
+                updateAllProgressBars();
+                renderSavedDates();
+                console.log("Tasks loaded and rendered successfully.");
+            } catch (e) {
+                console.error("Error loading tasks: ", e);
+                alert("Error loading tasks. Check browser console for details.");
+                // Ensure UI is cleared on error
+                tasksData = {
+                    study: [],
+                    skill: [],
+                    necessary: []
+                };
+                renderAllTasks();
+                updateAllProgressBars();
+                savedDatesContainer.innerHTML = '';
+            } finally {
+                hideLoading();
+            }
+        }
+
+        /**
+         * Saves the current tasksData object for the current date to Firestore.
+         * Only allows saving if a user is logged in.
+         */
+        async function saveTasks() {
+            if (!currentUserId) {
+                console.log("Not logged in. Cannot save tasks to Firestore.");
+                alert("Please log in to save your tasks."); // Let the user know
+                return;
+            }
+
+            try {
+                const docRef = db.collection("users").doc(currentUserId).collection("tasks").doc(currentDate);
+                await docRef.set(tasksData);
+                console.log("Tasks saved to Firestore for user:", currentUserId);
+                renderSavedDates(); // Update saved dates list after saving
+            } catch (error) {
+                console.error("Error saving tasks to Firestore:", error);
+                alert("Error saving tasks: " + error.message);
+            }
+        }
+
+        /**
+         * Adds a new task to the specified section for the current date.
+         * Requires login to add tasks.
+         * @param {string} sectionType - The type of section ('study', 'skill', 'necessary').
+         */
+        async function addTask(sectionType) {
+            if (!currentUserId) {
+                alert("Please log in to add tasks.");
+                return;
+            }
+
+            const inputElement = taskInputs[sectionType];
+            const taskText = inputElement.value.trim();
+
+            if (taskText) {
+                tasksData[sectionType].push({
+                    text: taskText,
+                    done: false
+                });
+                inputElement.value = ''; // Clear the input field
+                await saveTasks(); // Save changes to Firestore
+                renderTasks(sectionType); // Re-render tasks for the specific section
+                updateProgressBar(sectionType); // Update progress bar
+            }
+        }
+
+        /**
+         * Toggles the 'done' status of a task.
+         * Requires login to modify tasks.
+         * @param {string} sectionType - The type of section.
+         * @param {number} index - The index of the task in the array.
+         */
+        async function toggleTaskDone(sectionType, index) {
+            if (!currentUserId) {
+                alert("Please log in to modify tasks.");
+                return;
+            }
+
+            if (tasksData[sectionType] && tasksData[sectionType][index]) {
+                tasksData[sectionType][index].done = !tasksData[sectionType][index].done;
+                await saveTasks();
+                renderTasks(sectionType);
+                updateProgressBar(sectionType);
+            }
+        }
+
+        /**
+         * Deletes a task from the specified section with triple confirmation.
+         * Requires login to delete tasks.
+         * @param {string} sectionType - The type of section.
+         * @param {number} index - The index of the task in the array.
+         */
+        async function deleteTask(sectionType, index) {
+            if (!currentUserId) {
+                alert("Please log in to delete tasks.");
+                return;
+            }
+
+            // First confirmation
+            if (confirm('Are you absolutely sure you want to delete this task?')) {
+                // Second confirmation
+                if (confirm('This action cannot be undone. Confirm deletion again?')) {
+                    // Third and final confirmation
+                    if (confirm('Last chance! Are you REALLY sure you want to delete this?')) {
+                        // Perform deletion
+                        if (tasksData[sectionType] && tasksData[sectionType][index]) {
+                            tasksData[sectionType].splice(index, 1);
+                            await saveTasks();
+                            renderTasks(sectionType);
+                            updateProgressBar(sectionType);
+                            alert('Task deleted successfully.');
+                        }
+                    } else {
+                        alert('Deletion cancelled.');
+                    }
+                } else {
+                    alert('Deletion cancelled.');
+                }
+            } else {
+                alert('Deletion cancelled.');
+            }
+        }
+
+        /**
+         * Renders (or re-renders) the tasks for a given section.
+         * Clears the existing list and appends new list items based on current data.
+         * @param {string} sectionType - The type of section ('study', 'skill', 'necessary').
+         */
+        function renderTasks(sectionType) {
+            const listElement = taskLists[sectionType];
+            listElement.innerHTML = ''; // Clear current list
+
+            const tasks = tasksData[sectionType] || []; // Get tasks for the current section from tasksData
+
+            tasks.forEach((task, index) => {
+                const listItem = document.createElement('li');
+                listItem.className = `task-item ${task.done ? 'done' : ''}`;
+
+                listItem.innerHTML = `
+                    <span class="flex-grow text-gray-800">${task.text}</span>
+                    <div class="flex items-center gap-2">
+                        <button class="icon-button toggle-button" onclick="toggleTaskDone('${sectionType}', ${index})">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check-circle"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                        </button>
+                        <button class="icon-button delete-button" onclick="deleteTask('${sectionType}', ${index})">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucuce-trash-2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    </div>
+                `;
+                listElement.appendChild(listItem);
+            });
+        }
+
+        /**
+         * Renders all tasks for the current date across all sections.
+         */
+        function renderAllTasks() {
+            renderTasks('study');
+            renderTasks('skill');
+            renderTasks('necessary');
+        }
+
+
+        /**
+         * Renders buttons for all dates that have saved tasks for the current user.
+         */
+        async function renderSavedDates() {
+            savedDatesContainer.innerHTML = ''; // Clear existing buttons
+            showLoading();
+
+            try {
+                if (!currentUserId) {
+                    // If not logged in, no saved dates to show from user's data
+                    console.log("Not logged in. Cannot render saved dates.");
+                    hideLoading();
+                    return;
+                }
+
+                const userTasksCollectionRef = db.collection("users").doc(currentUserId).collection("tasks");
+                const querySnapshot = await userTasksCollectionRef.get();
+
+                const savedDates = [];
+                querySnapshot.forEach(doc => {
+                    // Check if the document has any actual tasks
+                    const data = doc.data();
+                    if ((data.study && data.study.length > 0) ||
+                        (data.skill && data.skill.length > 0) ||
+                        (data.necessary && data.necessary.length > 0) ||
+                        (data.self && data.self.length > 0) // Check old 'self' too for completeness
+                    ) {
+                        savedDates.push(doc.id); // doc.id is the date string
+                    }
+                });
+                savedDates.sort(); // Sort dates chronologically
+
+                savedDates.forEach(date => {
+                    const dateItem = document.createElement('div');
+                    dateItem.className = 'saved-date-item';
+
+                    const dateButton = document.createElement('button');
+                    dateButton.className = `date-button ${date === currentDate ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`;
+                    dateButton.textContent = formatDateForDisplay(date);
+                    dateButton.onclick = () => loadTasksForDate(date);
+
+                    const deleteButton = document.createElement('button');
+                    deleteButton.className = 'icon-button delete-button';
+                    deleteButton.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x-circle">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="m15 9-6 6"/>
+                            <path d="m9 9 6 6"/>
+                        </svg>
+                    `;
+                    deleteButton.title = `Delete all tasks for ${date}`;
+                    deleteButton.onclick = async (event) => {
+                        event.stopPropagation();
+                        await deleteDateEntry(date);
+                    };
+
+                    dateItem.appendChild(dateButton);
+                    dateItem.appendChild(deleteButton);
+                    savedDatesContainer.appendChild(dateItem);
+                });
+
+            } catch (error) {
+                console.error("Error rendering saved dates:", error);
+                alert("Error fetching saved dates: " + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        /**
+         * Deletes all tasks for a specific date entry with triple confirmation.
+         * Requires login.
+         * @param {string} dateToDelete - The date string (YYYY-MM-DD) whose entry needs to be deleted.
+         */
+        async function deleteDateEntry(dateToDelete) {
+            if (!currentUserId) {
+                alert("Please log in to delete task entries.");
+                return;
+            }
+            // Triple confirmation for deletion
+            if (confirm(`Are you absolutely sure you want to delete ALL tasks for ${formatDateForDisplay(dateToDelete)}?`) &&
+                confirm('This action cannot be undone and all tasks for this date will be permanently lost. Confirm deletion again?') &&
+                confirm('Final Warning! Are you REALLY sure you want to delete all tasks for this date?')
+            ) {
+                showLoading();
+                try {
+                    const docRef = db.collection("users").doc(currentUserId).collection("tasks").doc(dateToDelete);
+                    await docRef.delete();
+                    console.log(`Document ${dateToDelete} successfully deleted for user ${currentUserId}`);
+
+                    // If the currently selected date was deleted, reset UI
+                    if (dateToDelete === currentDate) {
+                        currentDate = formatDate(new Date());
+                        datePicker.value = currentDate;
+                        tasksData = {
+                            study: [],
+                            skill: [],
+                            necessary: []
+                        }; // Clear local data
+                        renderAllTasks(); // Render empty lists
+                        updateAllProgressBars();
+                    }
+                    await renderSavedDates(); // Re-render saved dates
+                    alert(`All tasks for ${formatDateForDisplay(dateToDelete)} deleted successfully.`);
+                } catch (error) {
+                    console.error("Error deleting date entry:", error);
+                    alert("Error deleting date entry: " + error.message);
+                } finally {
+                    hideLoading();
+                }
+            } else {
+                alert('Deletion cancelled.');
+            }
+        }
+
+        /**
+         * Displays a custom success modal with message and confetti.
+         * @param {string} sectionType - The type of section completed.
+         */
+        function showSuccessModal(sectionType) {
+            successModalTitle.textContent = 'Congratulations! 🎉🥳';
+            successModalMessage.textContent = `You've completed all tasks in the ${sectionType.toUpperCase()} section!`;
+            successModalOverlay.classList.add('show');
+            document.body.style.overflow = 'hidden'; // Prevent scrolling
+
+            // Generate confetti
+            for (let i = 0; i < 50; i++) {
+                const confetti = document.createElement('div');
+                confetti.classList.add('confetti');
+                confetti.style.left = `${Math.random() * 100}vw`;
+                confetti.style.top = `${-20 - Math.random() * 50}px`; // Start above screen
+                confetti.style.setProperty('--x', `${(Math.random() - 0.5) * 400}px`);
+                confetti.style.setProperty('--y', `${window.innerHeight + 100}px`);
+                confetti.style.setProperty('--deg', `${Math.random() * 360}deg`);
+                confetti.style.animationDelay = `${Math.random() * 0.8}s`;
+                document.body.appendChild(confetti);
+
+                // Remove confetti after animation
+                confetti.addEventListener('animationend', () => {
+                    confetti.remove();
+                });
+            }
+        }
+
+        /**
+         * Closes the custom success modal.
+         */
+        function closeSuccessModal() {
+            successModalOverlay.classList.remove('show');
+            document.body.style.overflow = ''; // Restore scrolling
+            // Remove any lingering confetti
+            document.querySelectorAll('.confetti').forEach(c => c.remove());
+        }
+
+        /**
+         * Updates the progress bar for a given section.
+         * Also adds emoji and plays audio/shows popup on 100% completion.
+         * @param {string} sectionType - The type of section ('study', 'skill', 'necessary').
+         */
+        function updateProgressBar(sectionType) {
+            const tasks = tasksData[sectionType] || [];
+            const totalTasks = tasks.length;
+            const completedTasks = tasks.filter(task => task.done).length;
+
+            const progressBarFill = progressBars[sectionType].fill;
+            const progressBarText = progressBars[sectionType].text;
+
+            let percentage = 0;
+            if (totalTasks > 0) {
+                percentage = Math.round((completedTasks / totalTasks) * 100);
+            }
+
+            progressBarFill.style.width = `${percentage}%`;
+
+            let emoji = '';
+            if (percentage === 0 && totalTasks > 0) {
+                emoji = '😭'; // Saddest
+            } else if (percentage > 0 && percentage <= 25) {
+                emoji = '😔'; // Sad
+            } else if (percentage > 25 && percentage <= 50) {
+                emoji = '😐'; // Neutral
+            } else if (percentage > 50 && percentage <= 75) {
+                emoji = '😊'; // Happy
+            } else if (percentage > 75 && percentage < 100) {
+                emoji = '💪'; // Very good / Strong
+            } else if (percentage === 100 && totalTasks > 0) {
+                emoji = '🎉'; // Celebration
+            } else {
+                emoji = ''; // No tasks
+            }
+
+
+            progressBarText.textContent = `${percentage}% ${emoji}`; // Only percentage and emoji
+
+            // Adjust text color based on progress for better readability
+            if (percentage > 50) {
+                progressBarText.style.color = 'white';
+            } else {
+                progressBarText.style.color = '#4a5568';
+            }
+
+            // Play audio and show popup on 100% completion
+            if (percentage === 100 && totalTasks > 0) {
+                const audio = document.getElementById('success-audio');
+                if (audio) {
+                    audio.play().catch(e => console.error("Error playing audio:", e));
+                }
+                setTimeout(() => {
+                    // Only show success modal if the current date is "today"
+                    // to avoid showing old completion alerts when navigating dates.
+                    const today = new Date();
+                    const formattedToday = formatDate(today);
+                    if (currentDate === formattedToday) {
+                        showSuccessModal(sectionType);
+                    }
+                }, 100); // Small delay to ensure audio plays
+            }
+        }
+
+        /**
+         * Updates all progress bars.
+         */
+        function updateAllProgressBars() {
+            updateProgressBar('study');
+            updateProgressBar('skill');
+            updateProgressBar('necessary');
+        }
+
+        // --- Modal Functions for Reading Funnel ---
+        function openReadingFunnelModal() {
+            readingFunnelModal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeReadingFunnelModal() {
+            readingFunnelModal.classList.add('hidden');
+            document.body.style.overflow = '';
+        }
+    </script>
+</body>
+
+</html>
