@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Task Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDzQQqJh_AAHT60V7Vv9WhtVVKbtY_a3Vk",
+            authDomain: "dailytasktracker-a5d86.firebaseapp.com",
+            projectId: "dailytasktracker-a5d86",
+            storageBucket: "dailytasktracker-a5d86.firebasestorage.app",
+            messagingSenderId: "903078792164",
+            appId: "1:903078792164:web:e12020a890a3f754ba95f1"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const ADMIN_UID = "Sx0d90b41FPeF9l6qa7kJCZirJp2"; 
+
+        let tasks = [];
+        let currentUser = null;
+        let currentOpenTaskId = null;
+        let currentEditData = null;
+
+        // --- NEW FEATURE: AUTO CLEANUP OLD DATA (OLDER THAN 7 DAYS) ---
+        async function autoCleanupTasks(allTasks, userUid) {
+            const today = new Date();
+            const sevenDaysAgo = new Date(today);
+            sevenDaysAgo.setDate(today.getDate() - 7);
+            const thresholdDate = sevenDaysAgo.toLocaleDateString('en-CA');
+
+            const updatedTasks = allTasks.filter(task => task.date >= thresholdDate);
+
+            if (updatedTasks.length !== allTasks.length) {
+                await setDoc(doc(db, "users", userUid), { tasks: updatedTasks });
+                return updatedTasks;
+            }
+            return allTasks;
+        }
+
+        function getSmartDate(allTasks) {
+            const today = new Date().toLocaleDateString('en-CA');
+            const hasTaskToday = allTasks.some(t => t.date === today);
+            
+            if (hasTaskToday) return today;
+            
+            if (allTasks.length > 0) {
+                const uniqueDates = [...new Set(allTasks.map(t => t.date))].sort();
+                const pastDates = uniqueDates.filter(d => d < today);
+                
+                if (pastDates.length > 0) {
+                    return pastDates[pastDates.length - 1];
+                }
+                return uniqueDates[0]; 
+            }
+            return today;
+        }
+
+        window.handleAuth = async () => {
+            const email = document.getElementById('emailInput').value;
+            const pass = document.getElementById('passInput').value;
+            if(!email || !pass) return alert("Please fill all fields");
+
+            try {
+                await setPersistence(auth, inMemoryPersistence);
+                await signInWithEmailAndPassword(auth, email, pass);
+                localStorage.setItem('savedEmail', email);
+                localStorage.setItem('savedPass', pass);
+                document.getElementById('loginOverlay').style.display = 'none';
+            } catch (error) {
+                alert(error.message);
+            }
+        };
+
+        window.togglePass = () => {
+            const passInput = document.getElementById('passInput');
+            const toggleIcon = document.getElementById('toggleIcon');
+            if (passInput.type === "password") {
+                passInput.type = "text";
+                toggleIcon.innerText = "👁️‍🗨️";
+            } else {
+                passInput.type = "password";
+                toggleIcon.innerText = "👁️";
+            }
+        };
+
+        window.logout = () => {
+            signOut(auth).then(() => location.reload());
+        };
+
+        async function loadViewOnlyData() {
+            const publicDocRef = doc(db, "users", "Sx0d90b41FPeF9l6qa7kJCZirJp2"); 
+            onSnapshot(publicDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    tasks = docSnap.data().tasks || [];
+                    document.getElementById('dateFilter').value = getSmartDate(tasks);
+                }
+                renderApp();
+            });
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            document.getElementById('app').style.display = 'block';
+            if (user) {
+                currentUser = user;
+                document.getElementById('loginBtnNav').style.display = 'none';
+                document.getElementById('logoutBtnNav').style.display = 'inline-block';
+                document.getElementById('deleteDayBtn').style.display = 'inline-block';
+                document.body.classList.add('is-logged-in'); 
+                document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'flex');
+                
+                onSnapshot(doc(db, "users", user.uid), async (docSnap) => {
+                    if (docSnap.exists()) {
+                        let allTasks = docSnap.data().tasks || [];
+                        
+                        // Apply Auto Cleanup before rendering
+                        allTasks = await autoCleanupTasks(allTasks, user.uid);
+
+                        const today = new Date().toLocaleDateString('en-CA');
+                        const incompleteTasks = allTasks.filter(t => {
+                            const isDone = t.subtasks.length > 0 ? t.subtasks.every(s => s.done) : t.completed;
+                            return t.date < today && !isDone && !t.moved; 
+                        });
+
+                        if (incompleteTasks.length > 0) {
+                            let hasUpdates = false;
+                            incompleteTasks.forEach(oldTask => {
+                                const originalTask = allTasks.find(t => t.id === oldTask.id);
+                                if (originalTask) originalTask.moved = true;
+                                const newTask = {
+                                    ...oldTask,
+                                    id: Date.now() + Math.random(),
+                                    date: today,
+                                    inProgress: false,
+                                    moved: false,
+                                    originalDate: oldTask.date,
+                                    subtasks: oldTask.subtasks.map(s => ({...s, inProgress: false}))
+                                };
+                                allTasks.push(newTask);
+                                hasUpdates = true;
+                            });
+                            if (hasUpdates) {
+                                tasks = allTasks;
+                                await setDoc(doc(db, "users", user.uid), { tasks: allTasks });
+                            }
+                        }
+                        tasks = allTasks;
+                        document.getElementById('dateFilter').value = getSmartDate(tasks);
+                    } else { tasks = []; }
+                    renderApp();
+                });
+            } else {
+                currentUser = null;
+                document.body.classList.remove('is-logged-in');
+                document.getElementById('loginBtnNav').style.display = 'inline-block';
+                document.getElementById('logoutBtnNav').style.display = 'none';
+                document.getElementById('deleteDayBtn').style.display = 'none';
+                document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+                loadViewOnlyData(); 
+            }
+        });
+
+        async function saveToFirebase() {
+            if (currentUser) {
+                await setDoc(doc(db, "users", currentUser.uid), { tasks: tasks });
+            } else {
+                alert("You are in View Only mode. Please login to save changes.");
+            }
+        }
+
+        window.addTask = async (cat) => {
+            if(!currentUser) return alert("Login to add tasks!");
+            const input = document.getElementById(cat === 'Study' ? 'studyIn' : 'otherIn');
+            const taskValue = input.value.trim(); 
+            if(!taskValue) { input.value = ''; return; }
+            
+            tasks.push({ 
+                id: Date.now(), 
+                title: taskValue, 
+                category: cat, 
+                date: document.getElementById('dateFilter').value, 
+                completed: false, 
+                inProgress: false,
+                isPrivate: false, 
+                subtasks: [] 
+            });
+            input.value = ''; 
+            await saveToFirebase();
+        };
+
+        window.togglePrivacy = async (e, id) => {
+            e.stopPropagation();
+            if(!currentUser) return;
+            const t = tasks.find(x => x.id === id);
+            t.isPrivate = !t.isPrivate;
+            await saveToFirebase();
+        };
+
+        window.toggleSubPrivacy = async (sid) => {
+            if(!currentUser) return;
+            const t = tasks.find(x => x.id === currentOpenTaskId);
+            const s = t.subtasks.find(x => x.id === sid);
+            s.isPrivate = !s.isPrivate;
+            await saveToFirebase();
+            renderSub();
+        };
+
+        window.toggleMain = async (id) => {
+            if(!currentUser) return alert("Login to modify tasks!");
+            const t = tasks.find(x => x.id === id);
+            const wasDone = isCatDone(t.category, t.date);
+            t.completed = !t.completed; 
+            if(t.completed) t.inProgress = false; 
+            await saveToFirebase();
+            if(!wasDone && isCatDone(t.category, t.date)) showCongrats(t.category);
+        };
+
+        window.toggleProgressMain = async (e, id) => {
+            e.stopPropagation();
+            if(!currentUser) return alert("Login to modify tasks!");
+            const t = tasks.find(x => x.id === id);
+            if(t.completed) return; 
+            t.inProgress = !t.inProgress;
+            await saveToFirebase();
+        };
+
+        window.toggleSub = async (sid) => {
+            if(!currentUser) return alert("Login to modify subtasks!");
+            const t = tasks.find(x => x.id === currentOpenTaskId);
+            const wasDone = isCatDone(t.category, t.date);
+            const s = t.subtasks.find(x => x.id === sid);
+            s.done = !s.done; 
+            if(s.done) s.inProgress = false; 
+            await saveToFirebase();
+            renderSub();
+            if(!wasDone && isCatDone(t.category, t.date)) showCongrats(t.category);
+        };
+
+        window.toggleProgressSub = async (sid) => {
+            if(!currentUser) return alert("Login to modify tasks!");
+            const t = tasks.find(x => x.id === currentOpenTaskId);
+            const s = t.subtasks.find(x => x.id === sid);
+            if(s.done) return;
+            s.inProgress = !s.inProgress;
+            await saveToFirebase();
+            renderSub();
+        };
+
+        window.addSubtask = async () => {
+            if(!currentUser) return alert("Login to add steps!");
+            const input = document.getElementById('mSubIn');
+            const val = input.value.trim();
+            if(!val) return;
+            tasks.find(x => x.id === currentOpenTaskId).subtasks.push({ 
+                id: Date.now(), 
+                text: val, 
+                done: false,
+                isPrivate: false,
+                inProgress: false 
+            });
+            input.value = ''; 
+            await saveToFirebase();
+            renderSub();
+        };
+
+        window.deleteT = async (id) => {
+            if(!currentUser) return;
+            if(confirm("Delete task?")) {
+                tasks = tasks.filter(x => x.id !== id);
+                await saveToFirebase();
+            }
+        };
+
+        window.deleteS = async (sid) => {
+            if(!currentUser) return;
+            if(confirm("Delete subtask?")) {
+                const t = tasks.find(x => x.id === currentOpenTaskId);
+                t.subtasks = t.subtasks.filter(x => x.id !== sid);
+                await saveToFirebase();
+                renderSub();
+            }
+        };
+
+        window.deleteCurrentDate = async () => {
+            if(!currentUser) return;
+            const date = document.getElementById('dateFilter').value;
+            if(confirm(`Are you sure you want to delete ALL tasks for ${date}?`)) {
+                tasks = tasks.filter(x => x.date !== date);
+                await saveToFirebase();
+            }
+        };
+
+        window.saveEdit = async () => {
+            if(!currentUser) return;
+            const t = tasks.find(x => x.id === currentEditData.id);
+            const newVal = document.getElementById('editField').value.trim();
+            if(!newVal) return;
+            if(currentEditData.type === 'main') t.title = newVal;
+            else t.subtasks.find(x => x.id === currentEditData.sid).text = newVal;
+            document.getElementById('editModal').style.display = 'none'; 
+            await saveToFirebase();
+            if(currentOpenTaskId) renderSub();
+        };
+
+        window.moveItem = async (type, id, direction) => {
+            if(!currentUser) return;
+            if (type === 'task') {
+                const index = tasks.findIndex(t => t.id === id);
+                const task = tasks[index];
+                const sameGroup = tasks.filter(t => t.date === task.date && t.category === task.category);
+                const subIndex = sameGroup.findIndex(t => t.id === id);
+                
+                if (direction === -1 && subIndex > 0) {
+                    const targetId = sameGroup[subIndex-1].id;
+                    const targetIndex = tasks.findIndex(t => t.id === targetId);
+                    [tasks[index], tasks[targetIndex]] = [tasks[targetIndex], tasks[index]];
+                } else if (direction === 1 && subIndex < sameGroup.length - 1) {
+                    const targetId = sameGroup[subIndex+1].id;
+                    const targetIndex = tasks.findIndex(t => t.id === targetId);
+                    [tasks[index], tasks[targetIndex]] = [tasks[targetIndex], tasks[index]];
+                }
+            } else {
+                const t = tasks.find(x => x.id === currentOpenTaskId);
+                const index = t.subtasks.findIndex(s => s.id === id);
+                if (direction === -1 && index > 0) {
+                    [t.subtasks[index], t.subtasks[index-1]] = [t.subtasks[index-1], t.subtasks[index]];
+                } else if (direction === 1 && index < t.subtasks.length - 1) {
+                    [t.subtasks[index], t.subtasks[index+1]] = [t.subtasks[index+1], t.subtasks[index]];
+                }
+                renderSub();
+            }
+            await saveToFirebase();
+        };
+
+        window.renderApp = () => {
+            const date = document.getElementById('dateFilter').value;
+            ['Study', 'Other'].forEach(cat => {
+                const container = document.getElementById(cat.toLowerCase() + 'List');
+                container.innerHTML = '';
+                let filtered = tasks.filter(t => {
+                    const basicFilter = (t.date === date && t.category === cat);
+                    if (!currentUser) {
+                        return basicFilter && !t.isPrivate;
+                    }
+                    return basicFilter;
+                });
+                
+                filtered.sort((a, b) => {
+                    const getPriority = (t) => {
+                        const isDone = t.subtasks.length > 0 ? t.subtasks.every(s => s.done) : t.completed;
+                        if (isDone) return 2; 
+                        const isInProgress = t.inProgress || t.subtasks.some(s => s.inProgress);
+                        if (isInProgress) return 0; 
+                        return 1; 
+                    };
+                    return getPriority(a) - getPriority(b);
+                });
+
+                let earned = 0, total = 0;
+                filtered.forEach((t) => {
+                    const subT = t.subtasks.length, subD = t.subtasks.filter(s => s.done).length;
+                    const isDone = subT > 0 ? (subD === subT && subT > 0) : t.completed;
+                    const per = subT > 0 ? Math.round((subD/subT)*100) : (t.completed ? 100 : 0);
+                    earned += per; total += 100;
+
+                    const isInProgress = !isDone && (t.inProgress || t.subtasks.some(s => s.inProgress));
+
+                    const div = document.createElement('div');
+                    div.className = `task-item ${isDone ? 'completed' : ''} ${isInProgress ? 'in-progress' : ''}`;
+                    div.onclick = () => openSubPopup(t.id);
+                    div.innerHTML = `
+                        <div class="task-main">
+                            <div style="flex:1">
+                                ${isInProgress ? '<span class="progress-badge">In Progress...</span><br>' : ''}
+                                <span style="font-weight: 500;">${t.isPrivate ? '🔒 ' : ''}${t.title}</span>
+                                ${t.originalDate ? `<br><span style="font-size: 0.7rem; color: #94a3b8; font-style: italic;">(Moved from: ${t.originalDate})</span>` : ''}
+                            </div>
+                            <div class="task-action-btns" style="display:flex; align-items:center; gap:8px;">
+                                ${(!isDone && !subT && currentUser) ? `<button class="btn-progress" title="Start Progress" onclick="toggleProgressMain(event, ${t.id})">${t.inProgress?'⏳':'🕒'}</button>` : ''}
+                                ${!subT ? `<button class="btn" style="padding: 6px 12px; font-size: 0.8rem; background:${t.completed?'#f1f5f9':'#dcfce7'}; color:${t.completed?'#64748b':'#166534'}; display:${!currentUser?'none':'block'}" onclick="event.stopPropagation(); toggleMain(${t.id})">${t.completed?'↩':'✔'}</button>` : `<b style="color:var(--primary)">${per}%</b>`}
+                            </div>
+                        </div>
+                        <div class="controls admin-only" style="display:${!currentUser?'none':'flex'}" onclick="event.stopPropagation()">
+                            <button class="icon-btn" title="Toggle Privacy" onclick="togglePrivacy(event, ${t.id})">
+                                ${t.isPrivate ? '🔓' : '🔒'}
+                            </button>
+                            <button class="icon-btn" onclick="moveItem('task', ${t.id}, -1)">▲</button>
+                            <button class="icon-btn" onclick="moveItem('task', ${t.id}, 1)">▼</button>
+                            <button class="icon-btn" onclick="openEdit('main', ${t.id})">✏️</button>
+                            <button class="icon-btn" style="color:#ef4444" onclick="deleteT(${t.id})">🗑️</button>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                });
+                const catPer = total > 0 ? Math.round((earned/total)*100) : 0;
+                document.getElementById(cat.toLowerCase()+'Bar').style.width = catPer + '%';
+                document.getElementById(cat.toLowerCase()+'Per').innerText = catPer + '%';
+                document.getElementById(cat.toLowerCase()+'Emoji').innerText = getEmoji(catPer);
+            });
+            updateHistoryUI();
+        };
+
+        window.openSubPopup = (id) => {
+            currentOpenTaskId = id; renderSub();
+            document.getElementById('subtaskModal').style.display = 'flex';
+        };
+
+        window.renderSub = () => {
+            const t = tasks.find(x => x.id === currentOpenTaskId);
+            if(!t) return;
+            const sortedSubs = [...t.subtasks].sort((a, b) => {
+                const getSubPriority = (s) => {
+                    if (s.done) return 2;
+                    if (s.inProgress) return 0;
+                    return 1;
+                };
+                return getSubPriority(a) - getSubPriority(b);
+            });
+            let visibleSubs = sortedSubs.filter(s => {
+                if (!currentUser) return !s.isPrivate; 
+                return true;
+            });
+            document.getElementById('mTitle').innerText = t.title;
+            document.getElementById('mSubList').innerHTML = visibleSubs.map(s => `
+                <div class="sub-item ${s.inProgress ? 'in-progress-sub' : ''}" style="${s.done ? 'opacity:0.6' : ''}">
+                    <input type="checkbox" style="width: 18px; height: 18px; cursor:pointer; display:${!currentUser?'none':'block'}" ${s.done?'checked':''} onchange="toggleSub(${s.id})">
+                    <div style="flex:1; margin-left:10px;">
+                        ${s.inProgress ? '<span class="progress-badge" style="font-size:0.55rem; padding: 1px 6px;">In Progress...</span><br>' : ''}
+                        <span style="${s.done?'text-decoration:line-through;':''}">${s.isPrivate ? '🔒 ' : ''}${s.text}</span>
+                    </div>
+                    <div class="controls admin-only" style="display:${!currentUser?'none':'flex'}; gap:4px;">
+                        ${!s.done ? `<button class="icon-btn" title="Toggle Progress" onclick="toggleProgressSub(${s.id})">${s.inProgress?'⏳':'🕒'}</button>` : ''}
+                        <button class="icon-btn" title="Toggle Privacy" onclick="toggleSubPrivacy(${s.id})">
+                            ${s.isPrivate ? '🔓' : '🔒'}
+                        </button>                        
+                        <button class="icon-btn" onclick="moveItem('sub', ${s.id}, -1)">▲</button>
+                        <button class="icon-btn" onclick="moveItem('sub', ${s.id}, 1)">▼</button>
+                        <button class="icon-btn" onclick="openEdit('sub', ${t.id}, ${s.id})">✏️</button>
+                        <button class="icon-btn" style="color:#ef4444" onclick="deleteS(${s.id})">✖</button>
+                    </div>
+                </div>
+            `).join('') || '<p style="text-align:center; color:#94a3b8">No steps yet.</p>';
+        };
+
+        window.openEdit = (type, id, sid=null) => {
+            if(!currentUser) return;
+            currentEditData = {type, id, sid};
+            const t = tasks.find(x => x.id === id);
+            document.getElementById('editField').value = type==='main' ? t.title : t.subtasks.find(x => x.id === sid).text;
+            document.getElementById('editModal').style.display = 'flex';
+        };
+
+        function getEmoji(p) { 
+            if(p === 0) return "😴"; if(p <= 20) return "🌱"; if(p <= 50) return "💪"; if(p <= 80) return "🚀"; if(p < 100) return "🏆"; return "👑";
+        }
+
+        function isCatDone(cat, date) {
+            const list = tasks.filter(t => t.date === date && t.category === cat);
+            return list.length > 0 && list.every(t => t.subtasks.length > 0 ? t.subtasks.every(s => s.done) : t.completed);
+        }
+
+        function updateHistoryUI() {
+            const uniqueDates = [...new Set(tasks.map(t => t.date))].sort();
+            const container = document.getElementById('dateHistory');
+            const current = document.getElementById('dateFilter').value;
+            container.innerHTML = uniqueDates.map(d => `
+                <button class="pill ${d === current ? 'active' : ''}" onclick="setDate('${d}')">📅 ${d}</button>
+            `).join('');
+        }
+
+        window.setDate = (d) => { document.getElementById('dateFilter').value = d; renderApp(); };
+        window.closeModal = () => { document.getElementById('subtaskModal').style.display = 'none'; currentOpenTaskId = null; };
+        window.closeEdit = () => { document.getElementById('editModal').style.display = 'none'; };
+        window.closeCongrats = () => { document.getElementById('congratsModal').style.display = 'none'; };
+        window.openLogin = async () => { 
+            const sEmail = localStorage.getItem('savedEmail');
+            const sPass = localStorage.getItem('savedPass');
+            if(sEmail && sPass) {
+                try {
+                    await setPersistence(auth, inMemoryPersistence);
+                    await signInWithEmailAndPassword(auth, sEmail, sPass);
+                    return; 
+                } catch (e) {
+                    document.getElementById('emailInput').value = sEmail;
+                    document.getElementById('passInput').value = sPass;
+                }
+            }
+            document.getElementById('loginOverlay').style.display = 'flex'; 
+        };
+        window.closeLogin = () => { document.getElementById('loginOverlay').style.display = 'none'; };
+
+        function showCongrats(cat) {
+            confetti({particleCount: 200, spread: 80, origin: {y: 0.6}});
+            const sound = document.getElementById('successSound');
+            sound.currentTime = 0;
+            sound.play().catch(e => console.log("Sound muted"));
+            document.getElementById('congratsTitle').innerText = (cat === 'Study') ? "Goal Achieved!" : "Done!";
+            document.getElementById('congratsModal').style.display = 'flex';
+        }
+
+        window.downloadPDF = () => {
+            const date = document.getElementById('dateFilter').value;
+            const dayTasks = tasks.filter(t => {
+                const isSameDate = t.date === date;
+                return currentUser ? isSameDate : (isSameDate && !t.isPrivate);
+            });
+            if (dayTasks.length === 0) return alert("No tasks found for this date!");
+
+            const element = document.createElement('div');
+            element.style.padding = "30px";
+            element.style.fontFamily = "'Outfit', sans-serif";
+            element.style.color = "#0f172a";
+
+            let content = `
+                <div style="text-align:center; margin-bottom:30px;">
+                    <h1 style="margin:0; color:#6366f1; font-size:28px;">Daily Task Report</h1>
+                    <p style="color:#64748b; font-size:16px; margin-top:5px;">Date: <b>${date}</b></p>
+                    <div style="height:4px; width:60px; background:#6366f1; margin:10px auto; border-radius:10px;"></div>
+                </div>
+            `;
+
+            ['Study', 'Other'].forEach(cat => {
+                const catTasks = dayTasks.filter(t => t.category === cat);
+                if(catTasks.length > 0) {
+                    content += `<h2 style="color:${cat==='Study'?'#10b981':'#f59e0b'}; border-bottom:1px solid #e2e8f0; padding-bottom:8px; margin-top:20px;">${cat} Goals</h2>`;
+                    catTasks.forEach(t => {
+                        const visibleSubsForPdf = t.subtasks.filter(s => currentUser ? true : !s.isPrivate);
+                        const isDone = visibleSubsForPdf.length > 0 ? visibleSubsForPdf.every(s => s.done) : t.completed;
+                        
+                        content += `
+                            <div style="margin-bottom:15px; padding:12px; border-radius:12px; border-left:5px solid ${isDone?'#10b981':'#e2e8f0'}; background:#f8fafc;">
+                                <div style="font-weight:600; font-size:15px; display:flex; align-items:center; gap:8px;">
+                                    <span style="font-weight: 500;">${t.isPrivate ? '🔒 ' : ''}${t.title}</span>
+                                    ${t.originalDate ? ` <small style="font-weight:normal; color:#94a3b8;">(From: ${t.originalDate})</small>` : ''}
+                                </div>
+                                ${visibleSubsForPdf.length > 0 ? `<ul style="margin:8px 0 0 25px; padding:0; color:#475569; font-size:13px;">` + visibleSubsForPdf.map(s => `<li style="margin-bottom:4px;">${s.done?'✓':'○'} ${s.isPrivate ? '[Private] ' : ''}${s.text}</li>`).join('') + `</ul>` : ''}
+                            </div>
+                        `;
+                    });
+                }
+            });
+
+            content += `<p style="text-align:center; margin-top:30px; font-size:11px; color:#94a3b8;">Generated by Daily Task Tracker</p>`;
+            element.innerHTML = content;
+            document.body.appendChild(element);
+
+            const opt = {
+                margin: 0.5,
+                filename: `Tasks_${date}.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 2 },
+                jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                document.body.removeChild(element);
+            });
+        };
+    </script>
+
+    <style>
+        :root {
+            --primary-font: 'Outfit', 'Poppins', 'Hind Siliguri', sans-serif;
+            --secondary-font: 'Inter', 'Hind Siliguri', sans-serif;
+            --primary: #6366f1;
+            --primary-light: #818cf8;
+            --study: #10b981;
+            --other: #f59e0b;
+            --bg: #f1f5f9;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --text-main: #0f172a;
+            --text-sub: #64748b;
+            --radius: 24px;
+            --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+        }
+
+        body { 
+            font-family: var(--primary-font);
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            margin: 0; 
+            color: var(--text-main);
+            min-height: 100vh;
+        }
+
+        .task-item.in-progress {
+            border-left: 6px solid var(--primary);
+            background: #f0f3ff;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.1);
+        }
+        .progress-badge {
+            display: inline-block;
+            font-size: 0.65rem;
+            color: var(--primary);
+            text-transform: uppercase;
+            font-weight: 800;
+            background: #e0e7ff;
+            padding: 2px 8px;
+            border-radius: 50px;
+            margin-bottom: 4px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        .btn-progress {
+            background: #e0e7ff;
+            border: none;
+            color: var(--primary);
+            padding: 6px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: 0.2s;
+            opacity: 0;
+            display: none; 
+        }
+        
+        .is-logged-in .btn-progress {
+            display: inline-block;
+        }
+
+        @media (min-width: 769px) {
+            .task-item:hover .btn-progress {
+                opacity: 1;
+            }
+        }
+        
+        .in-progress-sub {
+            border-left: 4px solid var(--primary) !important;
+            background: #f5f7ff !important;
+        }
+
+        #loginOverlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); display: none; justify-content: center; align-items: center; z-index: 5000; backdrop-filter: blur(8px); }
+        .login-card { background: white; padding: 40px; border-radius: var(--radius); text-align: center; width: 350px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.3); position: relative; }
+        .login-card h2 { margin-top: 0; font-weight: 700; color: var(--primary); margin-bottom: 25px; }
+
+        .pass-container { position: relative; width: 100%; margin-bottom: 20px; display: flex; align-items: center; }
+        .pass-container input { width: 100%; box-sizing: border-box; }
+        .toggle-btn { position: absolute; right: 12px; background: none; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-sub); padding: 0; display: flex; align-items: center; }
+
+        #app { display: none; padding: 40px 20px; max-width: 1100px; margin: 0 auto; animation: fadeIn 0.5s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .headline-section { text-align: center; margin-bottom: 40px; position: relative; }
+        .headline-section h1 { font-size: 2.8rem; letter-spacing: -1px; margin-bottom: 15px; background: linear-gradient(to right, #4f46e5, #9333ea); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        
+        .task-underline { position: relative; display: inline-block; -webkit-text-fill-color: initial; background: linear-gradient(to right, #4f46e5, #9333ea); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .task-underline::after { content: ""; position: absolute; left: 0; bottom: 2px; width: 100%; height: 4px; background: #6366f1; border-radius: 10px; }
+
+        .history-pills { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+        .pill { cursor: pointer; padding: 10px 20px; border-radius: 50px; font-size: 0.9rem; font-weight: 500; transition: 0.3s; background: white; color: var(--text-sub); border: 1px solid #e2e8f0; }
+        .pill.active { background: var(--primary); color: white; border-color: var(--primary); box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
+
+        .header-bar { background: var(--card-bg); padding: 15px 25px; border-radius: 20px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; box-shadow: var(--shadow); border: 1px solid rgba(255,255,255,0.5); }
+
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 30px; }
+        .section-card { background: var(--card-bg); border-radius: var(--radius); padding: 25px; box-shadow: var(--shadow); border: 1px solid rgba(255,255,255,0.6); transition: 0.3s; }
+        
+        .sec-header { margin-bottom: 20px; }
+        .sec-title { font-size: 1.2rem; font-weight: 700; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        
+        .sec-bar-outer { width: 100%; height: 12px; background: #e2e8f0; border-radius: 20px; overflow: hidden; margin-top: 10px; }
+        .sec-bar-inner { height: 100%; width: 0%; transition: 1s cubic-bezier(0.34, 1.56, 0.64, 1); background-size: 30px 30px; background-image: linear-gradient(135deg, rgba(255,255,255,.2) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.2) 50%, rgba(255,255,255,.2) 75%, transparent 75%, transparent); animation: stripeMove 2s linear infinite; }
+        @keyframes stripeMove { from { background-position: 0 0; } to { background-position: 30px 0; } }
+
+        .add-zone { display: flex; gap: 10px; margin-bottom: 20px; }
+        input[type="text"], input[type="password"], input[type="email"], input[type="date"] { flex: 1; padding: 12px 18px; border: 2px solid #e2e8f0; border-radius: 15px; outline: none; font-family: var(--secondary-font); transition: 0.2s; font-size: 0.95rem; }
+        input:focus { border-color: var(--primary); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1); }
+
+        .btn { border: none; padding: 10px 20px; border-radius: 12px; cursor: pointer; font-weight: 600; font-family: var(--secondary-font); transition: 0.2s; }
+        .btn-add { background: var(--primary); color: white; box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3); display: flex; align-items: center; justify-content: center; font-size: 1.4rem; width: 48px; height: 48px; padding: 0; flex-shrink: 0; }
+
+        .task-item { background: white; border: 1px solid #f1f5f9; border-radius: 18px; margin-bottom: 12px; padding: 16px; cursor: pointer; transition: 0.4s; display: flex; flex-direction: column; gap: 10px; position: relative; overflow: hidden; }
+        .task-item.completed { border-left: 6px solid var(--study); background: #f8fafc; opacity: 0.7; }
+        
+        .task-main { display: flex; justify-content: space-between; align-items: center; }
+        .controls { display: flex; gap: 4px; opacity: 0; transition: 0.3s; }
+        
+        .is-logged-in .task-item:hover .controls, 
+        .is-logged-in .sub-item:hover .controls { 
+            opacity: 1; 
+        }
+        
+        .sub-item { display: flex; align-items: center; gap: 12px; background: #f8fafc; padding: 12px; border-radius: 15px; margin-bottom: 8px; border: 1px solid #eee; transition: 0.3s; position: relative; }
+        .icon-btn { background: white; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #e2e8f0; cursor: pointer; font-size: 0.75rem; }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); display: none; justify-content: center; align-items: center; z-index: 2000; backdrop-filter: blur(6px); }
+        .modal-card { background: white; width: 90%; max-width: 480px; border-radius: 28px; padding: 35px; animation: modalPop 0.3s; }
+        
+        @media (max-width: 768px) {
+            .is-logged-in .controls { opacity: 1 !important; display: flex !important; }
+            .is-logged-in .btn-progress { opacity: 1 !important; } 
+            body:not(.is-logged-in) .controls { display: none !important; }
+            body:not(.is-logged-in) .btn-progress { display: none !important; }
+
+            .header-bar { flex-direction: column; gap: 12px; align-items: stretch; }
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .sub-item { padding: 14px; gap: 8px; }
+        }
+    </style>
+</head>
+<body class=""> <audio id="successSound" src="success.mp3" preload="auto"></audio>
+
+<div id="loginOverlay">
+    <div class="login-card">
+        <button onclick="closeLogin()" style="position:absolute; top:15px; right:15px; border:none; background:none; font-size:1.5rem; cursor:pointer; color:#94a3b8">×</button>
+        <div style="font-size: 3.5rem; margin-bottom: 15px;">🚀</div>
+        <h2>Admin Login</h2>
+        <input type="email" id="emailInput" placeholder="Email Address" style="width: 100%; margin-bottom: 12px; box-sizing: border-box;" onkeypress="if(event.key==='Enter') handleAuth()">
+        <div class="pass-container">
+            <input type="password" id="passInput" placeholder="Password" onkeypress="if(event.key==='Enter') handleAuth()">
+            <button class="toggle-btn" onclick="togglePass()" id="toggleIcon">👁️</button>
+        </div>
+        <button class="btn btn-add" style="width:100%; padding: 15px; height: auto; border-radius: 12px; font-size: 1rem;" onclick="handleAuth()">Login</button>
+    </div>
+</div>
+
+<div id="app">
+    <div class="headline-section">
+        <h1>Daily <span class="task-underline">Task</span> Tracker</h1>
+        <div id="dateHistory" class="history-pills"></div>
+    </div>
+
+    <div class="header-bar">
+        <div>
+            <input type="date" id="dateFilter" onchange="renderApp()" style="font-weight:700; border:none; background:transparent; color: var(--primary); font-size: 1rem; cursor: pointer;">
+            <button id="deleteDayBtn" class="btn" style="background:#fff1f2; color:#be123c; font-size:0.8rem; margin-left:10px; display:none;" onclick="deleteCurrentDate()">Delete This Date</button>
+        </div>
+        <div>
+            <button class="btn" style="background:#e0e7ff; color:#4338ca; margin-right: 8px;" onclick="downloadPDF()">Download PDF</button>
+            <button id="loginBtnNav" class="btn" style="background:var(--primary); color:white;" onclick="openLogin()">Admin Login</button>
+            <button id="logoutBtnNav" class="btn" style="background:#fff1f2; color:#be123c; display:none" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="section-card">
+            <div class="sec-header">
+                <div class="sec-title"><span>📚</span> Study Goals</div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="studyPer" style="font-weight: 800; color: var(--study); font-size: 1.4rem;">0%</span>
+                    <span id="studyEmoji" style="font-size: 1.6rem;">😴</span>
+                </div>
+                <div class="sec-bar-outer"><div id="studyBar" class="sec-bar-inner" style="background-color:var(--study)"></div></div>
+            </div>
+            <div class="add-zone admin-only">
+                <input type="text" id="studyIn" placeholder="New study goal..." onkeypress="if(event.key==='Enter') addTask('Study')">
+                <button class="btn btn-add" onclick="addTask('Study')">+</button>
+            </div>
+            <div id="studyList"></div>
+        </div>
+
+        <div class="section-card">
+            <div class="sec-header">
+                <div class="sec-title"><span>🛠️</span> General Tasks</div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="otherPer" style="font-weight: 800; color: var(--other); font-size: 1.4rem;">0%</span>
+                    <span id="otherEmoji" style="font-size: 1.6rem;">😴</span>
+                </div>
+                <div class="sec-bar-outer"><div id="otherBar" class="sec-bar-inner" style="background-color:var(--other)"></div></div>
+            </div>
+            <div class="add-zone admin-only">
+                <input type="text" id="otherIn" placeholder="New daily task..." onkeypress="if(event.key==='Enter') addTask('Other')">
+                <button class="btn btn-add" style="background:var(--other);" onclick="addTask('Other')">+</button>
+            </div>
+            <div id="otherList"></div>
+        </div>
+    </div>
+</div>
+
+<div id="subtaskModal" class="modal-overlay" onclick="closeModal()">
+    <div class="modal-card" onclick="event.stopPropagation()">
+        <h3 id="mTitle" style="margin-top:0; color:var(--primary);">Task Details</h3>
+        <div id="mSubList" style="max-height: 350px; overflow-y: auto; margin-bottom: 20px;"></div>
+        <div class="add-zone admin-only">
+            <input type="text" id="mSubIn" placeholder="Add a step..." onkeypress="if(event.key==='Enter') addSubtask()">
+            <button class="btn btn-add" onclick="addSubtask()">+</button>
+        </div>
+        <button class="btn" style="width:100%; background:#f1f5f9; font-weight:700; height: auto; border-radius: 12px;" onclick="closeModal()">Close</button>
+    </div>
+</div>
+
+<div id="congratsModal" class="modal-overlay">
+    <div class="modal-card" style="text-align: center;">
+        <div style="font-size: 5rem; margin-bottom: 15px;">🏆</div>
+        <h2 id="congratsTitle" style="color: var(--primary); font-size: 2rem; margin-bottom: 25px;">Excellent!</h2>
+        <button class="btn btn-add" style="width: 100%; padding: 15px; height: auto; border-radius: 12px; font-size: 1rem;" onclick="closeCongrats()">Keep Rolling</button>
+    </div>
+</div>
+
+<div id="editModal" class="modal-overlay" onclick="closeEdit()">
+    <div class="login-card" style="width: 90%; max-width: 400px;" onclick="event.stopPropagation()">
+        <h3 id="editModalTitle" style="color:var(--primary)">Edit Item</h3>
+        <input type="text" id="editField" style="width:100%; margin-bottom:20px; box-sizing: border-box;">
+        <button class="btn btn-add" style="width:100%; height: auto; border-radius: 12px; font-size: 1rem;" onclick="saveEdit()">Save Changes</button>
+    </div>
+</div>
+
+</body>
+</html>
